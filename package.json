@@ -9,12 +9,17 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@mapbox/polyline": "^1.2.1",
+    "mapbox-gl": "^3.20.0",
     "next": "16.2.0",
+    "next-auth": "^4.24.13",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-map-gl": "^8.1.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/mapbox-gl": "^3.4.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
