@@ -260,7 +260,12 @@ export default function TrailMap() {
 
       {/* Toggle button */}
       <button
-        onClick={() => setSidebarOpen(!sidebarOpen)}
+        onClick={() => {
+            setSidebarOpen(!sidebarOpen);
+            setTimeout(() => {
+              map.current?.resize();
+            }, 350);
+          }}
         style={{
           position: "absolute",
           top: "10px",
