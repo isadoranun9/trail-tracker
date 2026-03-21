@@ -6,16 +6,16 @@ import polyline from "@mapbox/polyline";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 interface Activity {
-    id: number;
-    name: string;
-    map: { summary_polyline: string };
-    start_date: string;
-    distance: number;
-    total_elevation_gain: number;
-    moving_time: number;
-    elev_high: number;
-    elev_low: number;
-  }
+  id: number;
+  name: string;
+  map: { summary_polyline: string };
+  start_date: string;
+  distance: number;
+  total_elevation_gain: number;
+  moving_time: number;
+  elev_high: number;
+  elev_low: number;
+}
 
 function formatTime(seconds: number) {
   const h = Math.floor(seconds / 3600);
@@ -58,6 +58,7 @@ export default function TrailMap() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
     fetch("/api/activities")
@@ -117,7 +118,6 @@ export default function TrailMap() {
             date: new Date(activity.start_date).toLocaleDateString(),
             elev_high: Math.round(activity.elev_high),
             elev_low: Math.round(activity.elev_low),
-            strava_url: `https://www.strava.com/activities/${activity.id}`,
             count,
             color,
           },
@@ -153,70 +153,60 @@ export default function TrailMap() {
         });
 
         map.current!.on("click", `trail-hit-${activity.id}`, (e) => {
-            const props = e.features?.[0]?.properties;
-            if (!props) return;
-          
-            if (hoveredId.current !== null) {
-              map.current!.setPaintProperty(
-                `trail-${hoveredId.current}`,
-                "line-color",
-                getHeatColor(repeatCounts.current[hoveredId.current])
-              );
-              map.current!.setPaintProperty(
-                `trail-${hoveredId.current}`,
-                "line-width",
-                3
-              );
-            }
-          
-            map.current!.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFFFFF");
-            map.current!.setPaintProperty(`trail-${activity.id}`, "line-width", 5);
-            hoveredId.current = activity.id;
-          
-            const popup = new mapboxgl.Popup({ offset: 12, closeButton: true })
-              .setLngLat(e.lngLat)
-              .setHTML(`
-                <div style="font-family: sans-serif; min-width: 200px;">
-                  <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">${props.name}</div>
-                  <div style="font-size: 12px; color: #555; line-height: 1.8;">
-                    📅 ${props.date}<br/>
-                    📏 ${props.distance} km<br/>
-                    ⬆️ ${props.elevation}m gain<br/>
-                    🏔️ Max: ${props.elev_high}m · Min: ${props.elev_low}m<br/>
-                    ⏱️ ${props.duration}<br/>
-                    🔁 Done ${props.count}x
-                  </div>
-                  <button
-                    id="strava-btn-${activity.id}"
-                    style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #FC4C02; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;"
-                  >
-                    View on Strava →
-                  </button>
-                </div>
-              `)
-              .addTo(map.current!);
+          const props = e.features?.[0]?.properties;
+          if (!props) return;
 
-            setTimeout(() => {
+          if (hoveredId.current !== null) {
+            map.current!.setPaintProperty(
+              `trail-${hoveredId.current}`,
+              "line-color",
+              getHeatColor(repeatCounts.current[hoveredId.current])
+            );
+            map.current!.setPaintProperty(
+              `trail-${hoveredId.current}`,
+              "line-width",
+              3
+            );
+          }
+
+          map.current!.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFFFFF");
+          map.current!.setPaintProperty(`trail-${activity.id}`, "line-width", 5);
+          hoveredId.current = activity.id;
+
+          const popup = new mapboxgl.Popup({ offset: 12, closeButton: true })
+            .setLngLat(e.lngLat)
+            .setHTML(`
+              <div style="font-family: sans-serif; min-width: 200px;">
+                <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">${props.name}</div>
+                <div style="font-size: 12px; color: #555; line-height: 1.8;">
+                  📅 ${props.date}<br/>
+                  📏 ${props.distance} km<br/>
+                  ⬆️ ${props.elevation}m gain<br/>
+                  🏔️ Max: ${props.elev_high}m · Min: ${props.elev_low}m<br/>
+                  ⏱️ ${props.duration}<br/>
+                  🔁 Done ${props.count}x
+                </div>
+                <button
+                  id="strava-btn-${activity.id}"
+                  style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #FC4C02; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;"
+                >
+                  View on Strava →
+                </button>
+              </div>
+            `)
+            .addTo(map.current!);
+
+          setTimeout(() => {
             const btn = document.getElementById(`strava-btn-${activity.id}`);
             if (btn) {
-                btn.addEventListener("click", () => {
+              btn.addEventListener("click", () => {
                 window.open(`https://www.strava.com/activities/${activity.id}`, "_blank");
-                });
+              });
             }
-            }, 100);
-          
-            // Attach click handler after popup is in the DOM
-            popup.on("open", () => {
-              const btn = document.getElementById(`strava-btn-${activity.id}`);
-              if (btn) {
-                btn.addEventListener("click", () => {
-                  window.open(`https://www.strava.com/activities/${activity.id}`, "_blank");
-                });
-              }
-            });
-          
-            setSelected(activity.id);
-          });
+          }, 100);
+
+          setSelected(activity.id);
+        });
 
         map.current!.on("mouseenter", `trail-hit-${activity.id}`, () => {
           map.current!.getCanvas().style.cursor = "pointer";
@@ -266,46 +256,74 @@ export default function TrailMap() {
   };
 
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
-      <div style={{ width: "280px", overflowY: "auto", padding: "1rem", background: "#1a1a1a", color: "white" }}>
-        <h2 style={{ marginBottom: "0.5rem" }}>🥾 My Trails</h2>
+    <div style={{ display: "flex", height: "100vh", position: "relative" }}>
 
-        <div style={{ marginBottom: "1rem", padding: "0.75rem", background: "#2a2a2a", borderRadius: "8px", fontSize: "11px" }}>
-          <div style={{ marginBottom: "4px", opacity: 0.7 }}>Trail frequency</div>
-          <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-            {["#2D6A4F", "#52B788", "#F4A261", "#E63946"].map((c) => (
-              <div key={c} style={{ width: "30px", height: "8px", background: c, borderRadius: "2px" }} />
-            ))}
+      {/* Toggle button */}
+      <button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        style={{
+          position: "absolute",
+          top: "10px",
+          left: sidebarOpen ? "290px" : "10px",
+          zIndex: 10,
+          background: "#2D6A4F",
+          color: "white",
+          border: "none",
+          borderRadius: "8px",
+          padding: "8px 12px",
+          cursor: "pointer",
+          fontSize: "16px",
+          transition: "left 0.3s ease",
+          boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+        }}
+      >
+        {sidebarOpen ? "◀" : "▶"}
+      </button>
+
+      {/* Sidebar */}
+      {sidebarOpen && (
+        <div style={{ width: "280px", overflowY: "auto", padding: "1rem", background: "#1a1a1a", color: "white", flexShrink: 0 }}>
+          <h2 style={{ marginBottom: "0.5rem" }}>🥾 My Trails</h2>
+
+          <div style={{ marginBottom: "1rem", padding: "0.75rem", background: "#2a2a2a", borderRadius: "8px", fontSize: "11px" }}>
+            <div style={{ marginBottom: "4px", opacity: 0.7 }}>Trail frequency</div>
+            <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+              {["#2D6A4F", "#52B788", "#F4A261", "#E63946"].map((c) => (
+                <div key={c} style={{ width: "30px", height: "8px", background: c, borderRadius: "2px" }} />
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "2px", opacity: 0.5 }}>
+              <span>once</span><span>often</span>
+            </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "2px", opacity: 0.5 }}>
-            <span>once</span><span>often</span>
-          </div>
+
+          {loading && <p style={{ opacity: 0.5 }}>Loading trails...</p>}
+          {activities.map((a) => (
+            <div
+              key={a.id}
+              onClick={() => handleSelectActivity(a)}
+              style={{
+                padding: "0.75rem",
+                marginBottom: "0.5rem",
+                background: selected === a.id ? "#2D6A4F" : "#2a2a2a",
+                borderRadius: "8px",
+                cursor: "pointer",
+                borderLeft: selected === a.id ? "3px solid #52B788" : "3px solid transparent",
+              }}
+            >
+              <div style={{ fontWeight: 500 }}>{a.name}</div>
+              <div style={{ fontSize: "12px", opacity: 0.7 }}>
+                {(a.distance / 1000).toFixed(1)} km · {a.total_elevation_gain}m gain
+              </div>
+              <div style={{ fontSize: "12px", opacity: 0.5 }}>
+                {new Date(a.start_date).toLocaleDateString()}
+              </div>
+            </div>
+          ))}
         </div>
+      )}
 
-        {loading && <p style={{ opacity: 0.5 }}>Loading trails...</p>}
-        {activities.map((a) => (
-          <div
-            key={a.id}
-            onClick={() => handleSelectActivity(a)}
-            style={{
-              padding: "0.75rem",
-              marginBottom: "0.5rem",
-              background: selected === a.id ? "#2D6A4F" : "#2a2a2a",
-              borderRadius: "8px",
-              cursor: "pointer",
-              borderLeft: selected === a.id ? "3px solid #52B788" : "3px solid transparent",
-            }}
-          >
-            <div style={{ fontWeight: 500 }}>{a.name}</div>
-            <div style={{ fontSize: "12px", opacity: 0.7 }}>
-              {(a.distance / 1000).toFixed(1)} km · {a.total_elevation_gain}m gain
-            </div>
-            <div style={{ fontSize: "12px", opacity: 0.5 }}>
-              {new Date(a.start_date).toLocaleDateString()}
-            </div>
-          </div>
-        ))}
-      </div>
+      {/* Map */}
       <div ref={mapContainer} style={{ flex: 1 }} />
     </div>
   );
