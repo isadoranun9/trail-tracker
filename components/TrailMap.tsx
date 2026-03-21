@@ -59,6 +59,7 @@ export default function TrailMap() {
   const [selected, setSelected] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
     fetch("/api/activities")
@@ -216,6 +217,8 @@ export default function TrailMap() {
           map.current!.getCanvas().style.cursor = "";
         });
       });
+
+      setMapReady(true);
     });
 
     return () => map.current?.remove();
@@ -224,7 +227,9 @@ export default function TrailMap() {
   const handleSelectActivity = (activity: Activity) => {
     setSelected(activity.id);
 
-    if (hoveredId.current !== null && map.current) {
+    if (!mapReady || !map.current) return;
+
+    if (hoveredId.current !== null) {
       map.current.setPaintProperty(
         `trail-${hoveredId.current}`,
         "line-color",
@@ -233,11 +238,9 @@ export default function TrailMap() {
       map.current.setPaintProperty(`trail-${hoveredId.current}`, "line-width", 3);
     }
 
-    if (map.current) {
-      map.current.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFFFFF");
-      map.current.setPaintProperty(`trail-${activity.id}`, "line-width", 5);
-      hoveredId.current = activity.id;
-    }
+    map.current.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFFFFF");
+    map.current.setPaintProperty(`trail-${activity.id}`, "line-width", 5);
+    hoveredId.current = activity.id;
 
     if (!activity.map?.summary_polyline) return;
 
@@ -252,7 +255,7 @@ export default function TrailMap() {
       [Math.max(...lngs), Math.max(...lats)]
     );
 
-    map.current?.fitBounds(bounds, { padding: 80, duration: 1200 });
+    map.current.fitBounds(bounds, { padding: 80, duration: 1200 });
   };
 
   return (
@@ -261,11 +264,11 @@ export default function TrailMap() {
       {/* Toggle button */}
       <button
         onClick={() => {
-            setSidebarOpen(!sidebarOpen);
-            setTimeout(() => {
-              map.current?.resize();
-            }, 350);
-          }}
+          setSidebarOpen(!sidebarOpen);
+          setTimeout(() => {
+            map.current?.resize();
+          }, 350);
+        }}
         style={{
           position: "absolute",
           top: "10px",
