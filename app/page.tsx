@@ -2,9 +2,16 @@
 
 import { useSession, signIn, signOut } from "next-auth/react";
 import TrailMap from "@/components/TrailMap";
+import { useEffect } from "react";
 
 export default function Home() {
   const { data: session, status } = useSession();
+
+  useEffect(() => {
+    if (session?.error === "RefreshTokenError") {
+      signIn("strava");
+    }
+  }, [session]);
 
   if (status === "loading") return <p>Loading...</p>;
 
