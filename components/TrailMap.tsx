@@ -17,6 +17,15 @@ interface Activity {
   elev_low: number;
 }
 
+interface Filters {
+  search: string;
+  minDistance: string;
+  maxDistance: string;
+  minElevation: string;
+  minTime: string;
+  maxTime: string;
+}
+
 function formatTime(seconds: number) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -50,6 +59,31 @@ function routesAreSimilar(coords1: number[][], coords2: number[][]): boolean {
   return matches >= 6;
 }
 
+function applyFilters(activities: Activity[], filters: Filters): Activity[] {
+  return activities.filter((a) => {
+    const distKm = a.distance / 1000;
+    const timeHours = a.moving_time / 3600;
+
+    if (filters.search && !a.name.toLowerCase().includes(filters.search.toLowerCase())) return false;
+    if (filters.minDistance && distKm < parseFloat(filters.minDistance)) return false;
+    if (filters.maxDistance && distKm > parseFloat(filters.maxDistance)) return false;
+    if (filters.minElevation && a.total_elevation_gain < parseFloat(filters.minElevation)) return false;
+    if (filters.minTime && timeHours < parseFloat(filters.minTime)) return false;
+    if (filters.maxTime && timeHours > parseFloat(filters.maxTime)) return false;
+
+    return true;
+  });
+}
+
+const defaultFilters: Filters = {
+  search: "",
+  minDistance: "",
+  maxDistance: "",
+  minElevation: "",
+  minTime: "",
+  maxTime: "",
+};
+
 export default function TrailMap() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -59,7 +93,12 @@ export default function TrailMap() {
   const [selected, setSelected] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [mapReady, setMapReady] = useState(false);
+  const [filters, setFilters] = useState<Filters>(defaultFilters);
+
+  const filteredActivities = applyFilters(activities, filters);
+  const activeFilterCount = Object.values(filters).filter((v) => v !== "").length;
 
   useEffect(() => {
     fetch("/api/activities")
@@ -96,9 +135,7 @@ export default function TrailMap() {
         let count = 1;
         activityList.forEach((b) => {
           if (a.id === b.id) return;
-          if (routesAreSimilar(decoded[a.id], decoded[b.id])) {
-            count++;
-          }
+          if (routesAreSimilar(decoded[a.id], decoded[b.id])) count++;
         });
         repeatCounts.current[a.id] = count;
       });
@@ -163,11 +200,7 @@ export default function TrailMap() {
               "line-color",
               getHeatColor(repeatCounts.current[hoveredId.current])
             );
-            map.current!.setPaintProperty(
-              `trail-${hoveredId.current}`,
-              "line-width",
-              3
-            );
+            map.current!.setPaintProperty(`trail-${hoveredId.current}`, "line-width", 3);
           }
 
           map.current!.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFFFFF");
@@ -224,6 +257,27 @@ export default function TrailMap() {
     return () => map.current?.remove();
   }, [activities]);
 
+  // Show/hide trails on map based on filters
+  useEffect(() => {
+    if (!mapReady || !map.current) return;
+    const filteredIds = new Set(filteredActivities.map((a) => a.id));
+    activities.forEach((a) => {
+      const visible = filteredIds.has(a.id);
+      if (map.current!.getLayer(`trail-${a.id}`)) {
+        map.current!.setLayoutProperty(
+          `trail-${a.id}`,
+          "visibility",
+          visible ? "visible" : "none"
+        );
+        map.current!.setLayoutProperty(
+          `trail-hit-${a.id}`,
+          "visibility",
+          visible ? "visible" : "none"
+        );
+      }
+    });
+  }, [filters, mapReady, activities, filteredActivities]);
+
   const handleSelectActivity = (activity: Activity) => {
     setSelected(activity.id);
 
@@ -258,16 +312,32 @@ export default function TrailMap() {
     map.current.fitBounds(bounds, { padding: 80, duration: 1200 });
   };
 
+  const inputStyle = {
+    width: "100%",
+    padding: "6px 8px",
+    borderRadius: "6px",
+    border: "1px solid #444",
+    background: "#1a1a1a",
+    color: "white",
+    fontSize: "12px",
+    boxSizing: "border-box" as const,
+  };
+
+  const labelStyle = {
+    fontSize: "11px",
+    opacity: 0.6,
+    marginBottom: "4px",
+    display: "block" as const,
+  };
+
   return (
     <div style={{ display: "flex", height: "100vh", position: "relative" }}>
 
-      {/* Toggle button */}
+      {/* Sidebar toggle button */}
       <button
         onClick={() => {
           setSidebarOpen(!sidebarOpen);
-          setTimeout(() => {
-            map.current?.resize();
-          }, 350);
+          setTimeout(() => map.current?.resize(), 350);
         }}
         style={{
           position: "absolute",
@@ -288,6 +358,123 @@ export default function TrailMap() {
         {sidebarOpen ? "◀" : "▶"}
       </button>
 
+      {/* Filter toggle button */}
+      <button
+        onClick={() => setFilterOpen(!filterOpen)}
+        style={{
+          position: "absolute",
+          top: "10px",
+          right: "10px",
+          zIndex: 10,
+          background: activeFilterCount > 0 ? "#F4A261" : "#2D6A4F",
+          color: "white",
+          border: "none",
+          borderRadius: "8px",
+          padding: "8px 12px",
+          cursor: "pointer",
+          fontSize: "13px",
+          fontWeight: 600,
+          boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+        }}
+      >
+        {activeFilterCount > 0 ? `⚙️ Filters (${activeFilterCount})` : "⚙️ Filters"}
+      </button>
+
+      {/* Filter panel */}
+      {filterOpen && (
+        <div style={{
+          position: "absolute",
+          top: "50px",
+          right: "10px",
+          zIndex: 10,
+          background: "#2a2a2a",
+          color: "white",
+          borderRadius: "12px",
+          padding: "1rem",
+          width: "240px",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+            <span style={{ fontWeight: 600, fontSize: "14px" }}>Filter Trails</span>
+            <button
+              onClick={() => setFilters(defaultFilters)}
+              style={{ fontSize: "11px", background: "none", border: "none", color: "#52B788", cursor: "pointer" }}
+            >
+              Clear all
+            </button>
+          </div>
+
+          {/* Search */}
+          <div style={{ marginBottom: "0.75rem" }}>
+            <label style={labelStyle}>Search by name</label>
+            <input
+              style={inputStyle}
+              placeholder="e.g. Cerro, Tantauco..."
+              value={filters.search}
+              onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+            />
+          </div>
+
+          {/* Distance */}
+          <div style={{ marginBottom: "0.75rem" }}>
+            <label style={labelStyle}>Distance (km)</label>
+            <div style={{ display: "flex", gap: "6px" }}>
+              <input
+                style={{ ...inputStyle, width: "50%" }}
+                placeholder="Min"
+                type="number"
+                value={filters.minDistance}
+                onChange={(e) => setFilters({ ...filters, minDistance: e.target.value })}
+              />
+              <input
+                style={{ ...inputStyle, width: "50%" }}
+                placeholder="Max"
+                type="number"
+                value={filters.maxDistance}
+                onChange={(e) => setFilters({ ...filters, maxDistance: e.target.value })}
+              />
+            </div>
+          </div>
+
+          {/* Elevation gain */}
+          <div style={{ marginBottom: "0.75rem" }}>
+            <label style={labelStyle}>Min elevation gain (m)</label>
+            <input
+              style={inputStyle}
+              placeholder="e.g. 500"
+              type="number"
+              value={filters.minElevation}
+              onChange={(e) => setFilters({ ...filters, minElevation: e.target.value })}
+            />
+          </div>
+
+          {/* Time */}
+          <div style={{ marginBottom: "0.75rem" }}>
+            <label style={labelStyle}>Duration (hours)</label>
+            <div style={{ display: "flex", gap: "6px" }}>
+              <input
+                style={{ ...inputStyle, width: "50%" }}
+                placeholder="Min"
+                type="number"
+                value={filters.minTime}
+                onChange={(e) => setFilters({ ...filters, minTime: e.target.value })}
+              />
+              <input
+                style={{ ...inputStyle, width: "50%" }}
+                placeholder="Max"
+                type="number"
+                value={filters.maxTime}
+                onChange={(e) => setFilters({ ...filters, maxTime: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div style={{ fontSize: "11px", opacity: 0.5, textAlign: "center" }}>
+            Showing {filteredActivities.length} of {activities.length} hikes
+          </div>
+        </div>
+      )}
+
       {/* Sidebar */}
       {sidebarOpen && (
         <div style={{ width: "280px", overflowY: "auto", padding: "1rem", background: "#1a1a1a", color: "white", flexShrink: 0 }}>
@@ -306,7 +493,7 @@ export default function TrailMap() {
           </div>
 
           {loading && <p style={{ opacity: 0.5 }}>Loading trails...</p>}
-          {activities.map((a) => (
+          {filteredActivities.map((a) => (
             <div
               key={a.id}
               onClick={() => handleSelectActivity(a)}
