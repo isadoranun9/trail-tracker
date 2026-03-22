@@ -203,7 +203,7 @@ export default function TrailMap() {
             map.current!.setPaintProperty(`trail-${hoveredId.current}`, "line-width", 3);
           }
 
-          map.current!.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFFFFF");
+          map.current!.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFD700");
           map.current!.setPaintProperty(`trail-${activity.id}`, "line-width", 5);
           hoveredId.current = activity.id;
 
@@ -292,7 +292,7 @@ export default function TrailMap() {
       map.current.setPaintProperty(`trail-${hoveredId.current}`, "line-width", 3);
     }
 
-    map.current.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFFFFF");
+    map.current.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFD700");
     map.current.setPaintProperty(`trail-${activity.id}`, "line-width", 5);
     hoveredId.current = activity.id;
 
