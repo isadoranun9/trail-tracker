@@ -77,7 +77,7 @@ export default function TrailMap() {
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: "mapbox://styles/mapbox/outdoors-v12",
+      style: "mapbox://styles/mapbox/light-v11",
       center: [-70.6, -33.4],
       zoom: 5,
     });
