@@ -73,7 +73,8 @@ function routesAreSimilar(coords1: number[][], coords2: number[][]): boolean {
 }
 
 function applyFilters(activities: Activity[], filters: Filters): Activity[] {
-  return activities.filter((a) => {
+    if (!Array.isArray(activities)) return [];
+    return activities.filter((a) => {
     const distKm = a.distance / 1000;
     const timeHours = a.moving_time / 3600;
     if (filters.search && !a.name.toLowerCase().includes(filters.search.toLowerCase())) return false;
@@ -87,7 +88,8 @@ function applyFilters(activities: Activity[], filters: Filters): Activity[] {
 }
 
 function applySuggestedFilters(trails: SuggestedTrail[], filters: SuggestedFilters): SuggestedTrail[] {
-  return trails.filter((t) => {
+    if (!Array.isArray(trails)) return [];
+    return trails.filter((t) => {
     const dist = parseFloat(t.distance || "0");
     const ascent = parseFloat(t.ascent || "0");
     if (filters.minDistance && dist < parseFloat(filters.minDistance)) return false;
