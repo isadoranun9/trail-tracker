@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import mapboxgl from "mapbox-gl";
 import polyline from "@mapbox/polyline";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -17,6 +17,17 @@ interface Activity {
   elev_low: number;
 }
 
+interface SuggestedTrail {
+  id: number;
+  name: string;
+  distance: string | null;
+  ascent: string | null;
+  difficulty: string | null;
+  description: string | null;
+  osm_url: string;
+  coordinates: number[][];
+}
+
 interface Filters {
   search: string;
   minDistance: string;
@@ -24,6 +35,13 @@ interface Filters {
   minElevation: string;
   minTime: string;
   maxTime: string;
+}
+
+interface SuggestedFilters {
+  minDistance: string;
+  maxDistance: string;
+  minAscent: string;
+  difficulty: string;
 }
 
 function formatTime(seconds: number) {
@@ -44,18 +62,13 @@ function routesAreSimilar(coords1: number[][], coords2: number[][]): boolean {
   const SAMPLE_COUNT = 8;
   const step = Math.floor(coords1.length / SAMPLE_COUNT);
   let matches = 0;
-
   for (let i = 0; i < SAMPLE_COUNT; i++) {
     const [lat1, lng1] = coords1[i * step] || coords1[0];
-    const isClose = coords2.some(([lat2, lng2]) => {
-      return (
-        Math.abs(lat1 - lat2) < THRESHOLD_DEG &&
-        Math.abs(lng1 - lng2) < THRESHOLD_DEG
-      );
-    });
+    const isClose = coords2.some(([lat2, lng2]) =>
+      Math.abs(lat1 - lat2) < THRESHOLD_DEG && Math.abs(lng1 - lng2) < THRESHOLD_DEG
+    );
     if (isClose) matches++;
   }
-
   return matches >= 6;
 }
 
@@ -63,14 +76,24 @@ function applyFilters(activities: Activity[], filters: Filters): Activity[] {
   return activities.filter((a) => {
     const distKm = a.distance / 1000;
     const timeHours = a.moving_time / 3600;
-
     if (filters.search && !a.name.toLowerCase().includes(filters.search.toLowerCase())) return false;
     if (filters.minDistance && distKm < parseFloat(filters.minDistance)) return false;
     if (filters.maxDistance && distKm > parseFloat(filters.maxDistance)) return false;
     if (filters.minElevation && a.total_elevation_gain < parseFloat(filters.minElevation)) return false;
     if (filters.minTime && timeHours < parseFloat(filters.minTime)) return false;
     if (filters.maxTime && timeHours > parseFloat(filters.maxTime)) return false;
+    return true;
+  });
+}
 
+function applySuggestedFilters(trails: SuggestedTrail[], filters: SuggestedFilters): SuggestedTrail[] {
+  return trails.filter((t) => {
+    const dist = parseFloat(t.distance || "0");
+    const ascent = parseFloat(t.ascent || "0");
+    if (filters.minDistance && dist < parseFloat(filters.minDistance)) return false;
+    if (filters.maxDistance && dist > parseFloat(filters.maxDistance)) return false;
+    if (filters.minAscent && ascent < parseFloat(filters.minAscent)) return false;
+    if (filters.difficulty && t.difficulty !== filters.difficulty) return false;
     return true;
   });
 }
@@ -84,21 +107,36 @@ const defaultFilters: Filters = {
   maxTime: "",
 };
 
+const defaultSuggestedFilters: SuggestedFilters = {
+  minDistance: "",
+  maxDistance: "",
+  minAscent: "",
+  difficulty: "",
+};
+
 export default function TrailMap() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const hoveredId = useRef<number | null>(null);
   const repeatCounts = useRef<Record<number, number>>({});
+  const suggestedLayerIds = useRef<Set<number>>(new Set());
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [suggestedTrails, setSuggestedTrails] = useState<SuggestedTrail[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingSuggested, setLoadingSuggested] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [showSuggested, setShowSuggested] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
+  const [suggestedFilters, setSuggestedFilters] = useState<SuggestedFilters>(defaultSuggestedFilters);
+  const [activeTab, setActiveTab] = useState<"my" | "suggested">("my");
 
   const filteredActivities = applyFilters(activities, filters);
+  const filteredSuggested = applySuggestedFilters(suggestedTrails, suggestedFilters);
   const activeFilterCount = Object.values(filters).filter((v) => v !== "").length;
+  const activeSuggestedFilterCount = Object.values(suggestedFilters).filter((v) => v !== "").length;
 
   useEffect(() => {
     fetch("/api/activities")
@@ -108,6 +146,23 @@ export default function TrailMap() {
         setLoading(false);
       });
   }, []);
+
+  const fetchSuggestedTrails = useCallback(() => {
+    if (!map.current || !showSuggested) return;
+    const bounds = map.current.getBounds();
+    if (!bounds) return;
+
+    setLoadingSuggested(true);
+    fetch(
+      `/api/suggested-trails?north=${bounds.getNorth()}&south=${bounds.getSouth()}&east=${bounds.getEast()}&west=${bounds.getWest()}`
+    )
+      .then((r) => r.json())
+      .then((trails: SuggestedTrail[]) => {
+        setSuggestedTrails(trails);
+        setLoadingSuggested(false);
+      })
+      .catch(() => setLoadingSuggested(false));
+  }, [showSuggested]);
 
   useEffect(() => {
     if (!mapContainer.current || activities.length === 0) return;
@@ -165,10 +220,7 @@ export default function TrailMap() {
           },
         };
 
-        map.current!.addSource(`trail-${activity.id}`, {
-          type: "geojson",
-          data: geojson,
-        });
+        map.current!.addSource(`trail-${activity.id}`, { type: "geojson", data: geojson });
 
         map.current!.addLayer({
           id: `trail-hit-${activity.id}`,
@@ -183,140 +235,100 @@ export default function TrailMap() {
           type: "line",
           source: `trail-${activity.id}`,
           layout: { "line-join": "round", "line-cap": "round" },
-          paint: {
-            "line-color": color,
-            "line-width": 3,
-            "line-opacity": 0.85,
-          },
+          paint: { "line-color": color, "line-width": 3, "line-opacity": 0.85 },
         });
 
         map.current!.on("click", `trail-hit-${activity.id}`, async (e) => {
-            const props = e.features?.[0]?.properties;
-            if (!props) return;
-          
-            if (hoveredId.current !== null) {
-              map.current!.setPaintProperty(
-                `trail-${hoveredId.current}`,
-                "line-color",
-                getHeatColor(repeatCounts.current[hoveredId.current])
-              );
-              map.current!.setPaintProperty(`trail-${hoveredId.current}`, "line-width", 3);
-            }
-          
-            map.current!.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFD700");
-            map.current!.setPaintProperty(`trail-${activity.id}`, "line-width", 5);
-            hoveredId.current = activity.id;
-          
-            // Show popup with loading state first
-            const popup = new mapboxgl.Popup({ offset: 12, closeButton: true, maxWidth: "280px" })
-              .setLngLat(e.lngLat)
-              .setHTML(`
-                <div style="font-family: sans-serif; min-width: 240px;">
-                  <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">${props.name}</div>
-                  <div style="font-size: 12px; color: #555; line-height: 1.8;">
-                    📅 ${props.date}<br/>
-                    📏 ${props.distance} km<br/>
-                    ⬆️ ${props.elevation}m gain<br/>
-                    🏔️ Max: ${props.elev_high}m · Min: ${props.elev_low}m<br/>
-                    ⏱️ ${props.duration}<br/>
-                    🔁 Done ${props.count}x
-                  </div>
-                  <canvas id="elev-chart-${activity.id}" width="240" height="80" style="margin-top: 10px; width: 100%;"></canvas>
-                  <button
-                    id="strava-btn-${activity.id}"
-                    style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #FC4C02; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;"
-                  >
-                    View on Strava →
-                  </button>
+          const props = e.features?.[0]?.properties;
+          if (!props) return;
+
+          if (hoveredId.current !== null) {
+            map.current!.setPaintProperty(`trail-${hoveredId.current}`, "line-color", getHeatColor(repeatCounts.current[hoveredId.current]));
+            map.current!.setPaintProperty(`trail-${hoveredId.current}`, "line-width", 3);
+          }
+
+          map.current!.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFD700");
+          map.current!.setPaintProperty(`trail-${activity.id}`, "line-width", 5);
+          hoveredId.current = activity.id;
+
+          const popup = new mapboxgl.Popup({ offset: 12, closeButton: true, maxWidth: "280px" })
+            .setLngLat(e.lngLat)
+            .setHTML(`
+              <div style="font-family: sans-serif; min-width: 240px;">
+                <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">${props.name}</div>
+                <div style="font-size: 12px; color: #555; line-height: 1.8;">
+                  📅 ${props.date}<br/>
+                  📏 ${props.distance} km<br/>
+                  ⬆️ ${props.elevation}m gain<br/>
+                  🏔️ Max: ${props.elev_high}m · Min: ${props.elev_low}m<br/>
+                  ⏱️ ${props.duration}<br/>
+                  🔁 Done ${props.count}x
                 </div>
-              `)
-              .addTo(map.current!);
-          
-            setTimeout(async () => {
-              // Wire up Strava button
-              const btn = document.getElementById(`strava-btn-${activity.id}`);
-              if (btn) {
-                btn.addEventListener("click", () => {
-                  window.open(`https://www.strava.com/activities/${activity.id}`, "_blank");
-                });
-              }
-          
-              // Fetch elevation stream and draw chart
-              try {
-                const res = await fetch(`/api/activities/${activity.id}/stream`);
-                const stream = await res.json();
-          
-                const altData: number[] = stream.altitude?.data ?? [];
-                const distData: number[] = stream.distance?.data ?? [];
-          
-                if (altData.length === 0) return;
-          
-                const canvas = document.getElementById(`elev-chart-${activity.id}`) as HTMLCanvasElement;
-                if (!canvas) return;
-          
-                const ctx = canvas.getContext("2d");
-                if (!ctx) return;
-          
-                const W = canvas.width;
-                const H = canvas.height;
-                const minAlt = Math.min(...altData);
-                const maxAlt = Math.max(...altData);
-                const range = maxAlt - minAlt || 1;
-                const maxDist = distData[distData.length - 1] || 1;
-          
-                // Background
-                ctx.fillStyle = "#f5f5f5";
-                ctx.fillRect(0, 0, W, H);
-          
-                // Draw filled elevation area
-                ctx.beginPath();
-                ctx.moveTo(0, H);
-          
-                altData.forEach((alt, i) => {
-                  const x = (distData[i] / maxDist) * W;
-                  const y = H - ((alt - minAlt) / range) * (H - 10) - 5;
-                  if (i === 0) ctx.lineTo(x, y);
-                  else ctx.lineTo(x, y);
-                });
-          
-                ctx.lineTo(W, H);
-                ctx.closePath();
-                ctx.fillStyle = "#52B788";
-                ctx.fill();
-          
-                // Draw line on top
-                ctx.beginPath();
-                altData.forEach((alt, i) => {
-                  const x = (distData[i] / maxDist) * W;
-                  const y = H - ((alt - minAlt) / range) * (H - 10) - 5;
-                  if (i === 0) ctx.moveTo(x, y);
-                  else ctx.lineTo(x, y);
-                });
-                ctx.strokeStyle = "#2D6A4F";
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
-          
-                // Min/max labels
-                ctx.fillStyle = "#555";
-                ctx.font = "9px sans-serif";
-                ctx.fillText(`${Math.round(minAlt)}m`, 2, H - 2);
-                ctx.fillText(`${Math.round(maxAlt)}m`, 2, 10);
-          
-              } catch (err) {
-                console.error("Failed to load elevation stream", err);
-              }
-            }, 100);
-          
-            setSelected(activity.id);
-          });
+                <canvas id="elev-chart-${activity.id}" width="240" height="80" style="margin-top: 10px; width: 100%;"></canvas>
+                <button id="strava-btn-${activity.id}" style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #FC4C02; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;">
+                  View on Strava →
+                </button>
+              </div>
+            `)
+            .addTo(map.current!);
 
-        map.current!.on("mouseenter", `trail-hit-${activity.id}`, () => {
-          map.current!.getCanvas().style.cursor = "pointer";
+          setTimeout(async () => {
+            const btn = document.getElementById(`strava-btn-${activity.id}`);
+            if (btn) btn.addEventListener("click", () => window.open(`https://www.strava.com/activities/${activity.id}`, "_blank"));
+
+            try {
+              const res = await fetch(`/api/activities/${activity.id}/stream`);
+              const stream = await res.json();
+              const altData: number[] = stream.altitude?.data ?? [];
+              const distData: number[] = stream.distance?.data ?? [];
+              if (altData.length === 0) return;
+              const canvas = document.getElementById(`elev-chart-${activity.id}`) as HTMLCanvasElement;
+              if (!canvas) return;
+              const ctx = canvas.getContext("2d");
+              if (!ctx) return;
+              const W = canvas.width;
+              const H = canvas.height;
+              const minAlt = Math.min(...altData);
+              const maxAlt = Math.max(...altData);
+              const range = maxAlt - minAlt || 1;
+              const maxDist = distData[distData.length - 1] || 1;
+              ctx.fillStyle = "#f5f5f5";
+              ctx.fillRect(0, 0, W, H);
+              ctx.beginPath();
+              ctx.moveTo(0, H);
+              altData.forEach((alt, i) => {
+                const x = (distData[i] / maxDist) * W;
+                const y = H - ((alt - minAlt) / range) * (H - 10) - 5;
+                ctx.lineTo(x, y);
+              });
+              ctx.lineTo(W, H);
+              ctx.closePath();
+              ctx.fillStyle = "#52B788";
+              ctx.fill();
+              ctx.beginPath();
+              altData.forEach((alt, i) => {
+                const x = (distData[i] / maxDist) * W;
+                const y = H - ((alt - minAlt) / range) * (H - 10) - 5;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+              });
+              ctx.strokeStyle = "#2D6A4F";
+              ctx.lineWidth = 1.5;
+              ctx.stroke();
+              ctx.fillStyle = "#555";
+              ctx.font = "9px sans-serif";
+              ctx.fillText(`${Math.round(minAlt)}m`, 2, H - 2);
+              ctx.fillText(`${Math.round(maxAlt)}m`, 2, 10);
+            } catch (err) {
+              console.error("Failed to load elevation stream", err);
+            }
+          }, 100);
+
+          setSelected(activity.id);
         });
 
-        map.current!.on("mouseleave", `trail-hit-${activity.id}`, () => {
-          map.current!.getCanvas().style.cursor = "";
-        });
+        map.current!.on("mouseenter", `trail-hit-${activity.id}`, () => { map.current!.getCanvas().style.cursor = "pointer"; });
+        map.current!.on("mouseleave", `trail-hit-${activity.id}`, () => { map.current!.getCanvas().style.cursor = ""; });
       });
 
       setMapReady(true);
@@ -325,58 +337,119 @@ export default function TrailMap() {
     return () => map.current?.remove();
   }, [activities]);
 
-  // Show/hide trails on map based on filters
+  // Draw suggested trails on map
+  useEffect(() => {
+    if (!mapReady || !map.current) return;
+
+    // Remove old suggested layers
+    suggestedLayerIds.current.forEach((id) => {
+      if (map.current!.getLayer(`suggested-hit-${id}`)) map.current!.removeLayer(`suggested-hit-${id}`);
+      if (map.current!.getLayer(`suggested-${id}`)) map.current!.removeLayer(`suggested-${id}`);
+      if (map.current!.getSource(`suggested-${id}`)) map.current!.removeSource(`suggested-${id}`);
+    });
+    suggestedLayerIds.current.clear();
+
+    if (!showSuggested) return;
+
+    filteredSuggested.forEach((trail) => {
+      if (trail.coordinates.length < 2) return;
+
+      const geojson: GeoJSON.Feature = {
+        type: "Feature",
+        properties: { id: trail.id, name: trail.name },
+        geometry: { type: "LineString", coordinates: trail.coordinates },
+      };
+
+      map.current!.addSource(`suggested-${trail.id}`, { type: "geojson", data: geojson });
+
+      map.current!.addLayer({
+        id: `suggested-hit-${trail.id}`,
+        type: "line",
+        source: `suggested-${trail.id}`,
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: { "line-color": "transparent", "line-width": 20 },
+      });
+
+      map.current!.addLayer({
+        id: `suggested-${trail.id}`,
+        type: "line",
+        source: `suggested-${trail.id}`,
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": "#3B82F6",
+          "line-width": 2,
+          "line-opacity": 0.8,
+          "line-dasharray": [2, 2],
+        },
+      });
+
+      map.current!.on("click", `suggested-hit-${trail.id}`, (e) => {
+        new mapboxgl.Popup({ offset: 12, closeButton: true })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family: sans-serif; min-width: 200px;">
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">⭐ ${trail.name}</div>
+              <div style="font-size: 12px; color: #555; line-height: 1.8;">
+                ${trail.distance ? `📏 ${trail.distance} km<br/>` : ""}
+                ${trail.ascent ? `⬆️ ${trail.ascent}m ascent<br/>` : ""}
+                ${trail.difficulty ? `💪 ${trail.difficulty.replace(/_/g, " ")}<br/>` : ""}
+                ${trail.description ? `📝 ${trail.description}<br/>` : ""}
+              </div>
+              <button
+                id="osm-btn-${trail.id}"
+                style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #3B82F6; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;"
+              >
+                View on OSM →
+              </button>
+            </div>
+          `)
+          .addTo(map.current!);
+
+        setTimeout(() => {
+          const btn = document.getElementById(`osm-btn-${trail.id}`);
+          if (btn) btn.addEventListener("click", () => window.open(trail.osm_url, "_blank"));
+        }, 100);
+      });
+
+      map.current!.on("mouseenter", `suggested-hit-${trail.id}`, () => { map.current!.getCanvas().style.cursor = "pointer"; });
+      map.current!.on("mouseleave", `suggested-hit-${trail.id}`, () => { map.current!.getCanvas().style.cursor = ""; });
+
+      suggestedLayerIds.current.add(trail.id);
+    });
+  }, [filteredSuggested, showSuggested, mapReady]);
+
+  // Filter visibility for my trails
   useEffect(() => {
     if (!mapReady || !map.current) return;
     const filteredIds = new Set(filteredActivities.map((a) => a.id));
     activities.forEach((a) => {
       const visible = filteredIds.has(a.id);
       if (map.current!.getLayer(`trail-${a.id}`)) {
-        map.current!.setLayoutProperty(
-          `trail-${a.id}`,
-          "visibility",
-          visible ? "visible" : "none"
-        );
-        map.current!.setLayoutProperty(
-          `trail-hit-${a.id}`,
-          "visibility",
-          visible ? "visible" : "none"
-        );
+        map.current!.setLayoutProperty(`trail-${a.id}`, "visibility", visible ? "visible" : "none");
+        map.current!.setLayoutProperty(`trail-hit-${a.id}`, "visibility", visible ? "visible" : "none");
       }
     });
   }, [filters, mapReady, activities, filteredActivities]);
 
   const handleSelectActivity = (activity: Activity) => {
     setSelected(activity.id);
-
     if (!mapReady || !map.current) return;
-
     if (hoveredId.current !== null) {
-      map.current.setPaintProperty(
-        `trail-${hoveredId.current}`,
-        "line-color",
-        getHeatColor(repeatCounts.current[hoveredId.current])
-      );
+      map.current.setPaintProperty(`trail-${hoveredId.current}`, "line-color", getHeatColor(repeatCounts.current[hoveredId.current]));
       map.current.setPaintProperty(`trail-${hoveredId.current}`, "line-width", 3);
     }
-
     map.current.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFD700");
     map.current.setPaintProperty(`trail-${activity.id}`, "line-width", 5);
     hoveredId.current = activity.id;
-
     if (!activity.map?.summary_polyline) return;
-
     const coords = polyline.decode(activity.map.summary_polyline);
     if (coords.length === 0) return;
-
     const lats = coords.map(([lat]) => lat);
     const lngs = coords.map(([, lng]) => lng);
-
     const bounds = new mapboxgl.LngLatBounds(
       [Math.min(...lngs), Math.min(...lats)],
       [Math.max(...lngs), Math.max(...lats)]
     );
-
     map.current.fitBounds(bounds, { padding: 80, duration: 1200 });
   };
 
@@ -401,188 +474,252 @@ export default function TrailMap() {
   return (
     <div style={{ display: "flex", height: "100vh", position: "relative" }}>
 
-      {/* Sidebar toggle button */}
+      {/* Sidebar toggle */}
       <button
-        onClick={() => {
-          setSidebarOpen(!sidebarOpen);
-          setTimeout(() => map.current?.resize(), 350);
-        }}
+        onClick={() => { setSidebarOpen(!sidebarOpen); setTimeout(() => map.current?.resize(), 350); }}
         style={{
-          position: "absolute",
-          top: "10px",
-          left: sidebarOpen ? "290px" : "10px",
-          zIndex: 10,
-          background: "#2D6A4F",
-          color: "white",
-          border: "none",
-          borderRadius: "8px",
-          padding: "8px 12px",
-          cursor: "pointer",
-          fontSize: "16px",
-          transition: "left 0.3s ease",
-          boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+          position: "absolute", top: "10px", left: sidebarOpen ? "290px" : "10px",
+          zIndex: 10, background: "#2D6A4F", color: "white", border: "none",
+          borderRadius: "8px", padding: "8px 12px", cursor: "pointer",
+          fontSize: "16px", transition: "left 0.3s ease", boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
         }}
       >
         {sidebarOpen ? "◀" : "▶"}
       </button>
 
-      {/* Filter toggle button */}
+      {/* Filter toggle */}
       <button
         onClick={() => setFilterOpen(!filterOpen)}
         style={{
-          position: "absolute",
-          top: "10px",
-          right: "10px",
-          zIndex: 10,
-          background: activeFilterCount > 0 ? "#F4A261" : "#2D6A4F",
-          color: "white",
-          border: "none",
-          borderRadius: "8px",
-          padding: "8px 12px",
-          cursor: "pointer",
-          fontSize: "13px",
-          fontWeight: 600,
+          position: "absolute", top: "10px", right: "10px", zIndex: 10,
+          background: (activeFilterCount + activeSuggestedFilterCount) > 0 ? "#F4A261" : "#2D6A4F",
+          color: "white", border: "none", borderRadius: "8px", padding: "8px 12px",
+          cursor: "pointer", fontSize: "13px", fontWeight: 600,
           boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
         }}
       >
-        {activeFilterCount > 0 ? `⚙️ Filters (${activeFilterCount})` : "⚙️ Filters"}
+        {(activeFilterCount + activeSuggestedFilterCount) > 0 ? `⚙️ Filters (${activeFilterCount + activeSuggestedFilterCount})` : "⚙️ Filters"}
       </button>
 
       {/* Filter panel */}
       {filterOpen && (
         <div style={{
-          position: "absolute",
-          top: "50px",
-          right: "10px",
-          zIndex: 10,
-          background: "#2a2a2a",
-          color: "white",
-          borderRadius: "12px",
-          padding: "1rem",
-          width: "240px",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+          position: "absolute", top: "50px", right: "10px", zIndex: 10,
+          background: "#2a2a2a", color: "white", borderRadius: "12px",
+          padding: "1rem", width: "240px", boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+          maxHeight: "80vh", overflowY: "auto",
         }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-            <span style={{ fontWeight: 600, fontSize: "14px" }}>Filter Trails</span>
-            <button
-              onClick={() => setFilters(defaultFilters)}
-              style={{ fontSize: "11px", background: "none", border: "none", color: "#52B788", cursor: "pointer" }}
-            >
-              Clear all
-            </button>
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: "8px", marginBottom: "1rem" }}>
+            {(["my", "suggested"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                style={{
+                  flex: 1, padding: "6px", borderRadius: "6px", border: "none",
+                  background: activeTab === tab ? "#2D6A4F" : "#1a1a1a",
+                  color: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600,
+                }}
+              >
+                {tab === "my" ? "My Trails" : "Suggested"}
+              </button>
+            ))}
           </div>
 
-          {/* Search */}
-          <div style={{ marginBottom: "0.75rem" }}>
-            <label style={labelStyle}>Search by name</label>
-            <input
-              style={inputStyle}
-              placeholder="e.g. Cerro, Tantauco..."
-              value={filters.search}
-              onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-            />
-          </div>
+          {activeTab === "my" && (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                <span style={{ fontWeight: 600, fontSize: "14px" }}>My Trail Filters</span>
+                <button onClick={() => setFilters(defaultFilters)} style={{ fontSize: "11px", background: "none", border: "none", color: "#52B788", cursor: "pointer" }}>Clear</button>
+              </div>
 
-          {/* Distance */}
-          <div style={{ marginBottom: "0.75rem" }}>
-            <label style={labelStyle}>Distance (km)</label>
-            <div style={{ display: "flex", gap: "6px" }}>
-              <input
-                style={{ ...inputStyle, width: "50%" }}
-                placeholder="Min"
-                type="number"
-                value={filters.minDistance}
-                onChange={(e) => setFilters({ ...filters, minDistance: e.target.value })}
-              />
-              <input
-                style={{ ...inputStyle, width: "50%" }}
-                placeholder="Max"
-                type="number"
-                value={filters.maxDistance}
-                onChange={(e) => setFilters({ ...filters, maxDistance: e.target.value })}
-              />
-            </div>
-          </div>
+              <div style={{ marginBottom: "0.75rem" }}>
+                <label style={labelStyle}>Search by name</label>
+                <input style={inputStyle} placeholder="e.g. Cerro..." value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} />
+              </div>
+              <div style={{ marginBottom: "0.75rem" }}>
+                <label style={labelStyle}>Distance (km)</label>
+                <div style={{ display: "flex", gap: "6px" }}>
+                  <input style={{ ...inputStyle, width: "50%" }} placeholder="Min" type="number" value={filters.minDistance} onChange={(e) => setFilters({ ...filters, minDistance: e.target.value })} />
+                  <input style={{ ...inputStyle, width: "50%" }} placeholder="Max" type="number" value={filters.maxDistance} onChange={(e) => setFilters({ ...filters, maxDistance: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ marginBottom: "0.75rem" }}>
+                <label style={labelStyle}>Min elevation gain (m)</label>
+                <input style={inputStyle} placeholder="e.g. 500" type="number" value={filters.minElevation} onChange={(e) => setFilters({ ...filters, minElevation: e.target.value })} />
+              </div>
+              <div style={{ marginBottom: "0.75rem" }}>
+                <label style={labelStyle}>Duration (hours)</label>
+                <div style={{ display: "flex", gap: "6px" }}>
+                  <input style={{ ...inputStyle, width: "50%" }} placeholder="Min" type="number" value={filters.minTime} onChange={(e) => setFilters({ ...filters, minTime: e.target.value })} />
+                  <input style={{ ...inputStyle, width: "50%" }} placeholder="Max" type="number" value={filters.maxTime} onChange={(e) => setFilters({ ...filters, maxTime: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ fontSize: "11px", opacity: 0.5, textAlign: "center" }}>
+                Showing {filteredActivities.length} of {activities.length} hikes
+              </div>
+            </>
+          )}
 
-          {/* Elevation gain */}
-          <div style={{ marginBottom: "0.75rem" }}>
-            <label style={labelStyle}>Min elevation gain (m)</label>
-            <input
-              style={inputStyle}
-              placeholder="e.g. 500"
-              type="number"
-              value={filters.minElevation}
-              onChange={(e) => setFilters({ ...filters, minElevation: e.target.value })}
-            />
-          </div>
+          {activeTab === "suggested" && (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                <span style={{ fontWeight: 600, fontSize: "14px" }}>Suggested Filters</span>
+                <button onClick={() => setSuggestedFilters(defaultSuggestedFilters)} style={{ fontSize: "11px", background: "none", border: "none", color: "#52B788", cursor: "pointer" }}>Clear</button>
+              </div>
 
-          {/* Time */}
-          <div style={{ marginBottom: "0.75rem" }}>
-            <label style={labelStyle}>Duration (hours)</label>
-            <div style={{ display: "flex", gap: "6px" }}>
-              <input
-                style={{ ...inputStyle, width: "50%" }}
-                placeholder="Min"
-                type="number"
-                value={filters.minTime}
-                onChange={(e) => setFilters({ ...filters, minTime: e.target.value })}
-              />
-              <input
-                style={{ ...inputStyle, width: "50%" }}
-                placeholder="Max"
-                type="number"
-                value={filters.maxTime}
-                onChange={(e) => setFilters({ ...filters, maxTime: e.target.value })}
-              />
-            </div>
-          </div>
-
-          <div style={{ fontSize: "11px", opacity: 0.5, textAlign: "center" }}>
-            Showing {filteredActivities.length} of {activities.length} hikes
-          </div>
+              <div style={{ marginBottom: "0.75rem" }}>
+                <label style={labelStyle}>Distance (km)</label>
+                <div style={{ display: "flex", gap: "6px" }}>
+                  <input style={{ ...inputStyle, width: "50%" }} placeholder="Min" type="number" value={suggestedFilters.minDistance} onChange={(e) => setSuggestedFilters({ ...suggestedFilters, minDistance: e.target.value })} />
+                  <input style={{ ...inputStyle, width: "50%" }} placeholder="Max" type="number" value={suggestedFilters.maxDistance} onChange={(e) => setSuggestedFilters({ ...suggestedFilters, maxDistance: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ marginBottom: "0.75rem" }}>
+                <label style={labelStyle}>Min ascent (m)</label>
+                <input style={inputStyle} placeholder="e.g. 500" type="number" value={suggestedFilters.minAscent} onChange={(e) => setSuggestedFilters({ ...suggestedFilters, minAscent: e.target.value })} />
+              </div>
+              <div style={{ marginBottom: "0.75rem" }}>
+                <label style={labelStyle}>Difficulty</label>
+                <select
+                  style={{ ...inputStyle }}
+                  value={suggestedFilters.difficulty}
+                  onChange={(e) => setSuggestedFilters({ ...suggestedFilters, difficulty: e.target.value })}
+                >
+                  <option value="">Any</option>
+                  <option value="hiking">Hiking (easy)</option>
+                  <option value="mountain_hiking">Mountain hiking</option>
+                  <option value="demanding_mountain_hiking">Demanding mountain</option>
+                  <option value="alpine_hiking">Alpine hiking</option>
+                </select>
+              </div>
+              <div style={{ fontSize: "11px", opacity: 0.5, textAlign: "center", marginBottom: "0.75rem" }}>
+                Showing {filteredSuggested.length} of {suggestedTrails.length} suggested
+              </div>
+            </>
+          )}
         </div>
       )}
 
       {/* Sidebar */}
       {sidebarOpen && (
         <div style={{ width: "280px", overflowY: "auto", padding: "1rem", background: "#1a1a1a", color: "white", flexShrink: 0 }}>
-          <h2 style={{ marginBottom: "0.5rem" }}>🥾 My Trails</h2>
 
-          <div style={{ marginBottom: "1rem", padding: "0.75rem", background: "#2a2a2a", borderRadius: "8px", fontSize: "11px" }}>
-            <div style={{ marginBottom: "4px", opacity: 0.7 }}>Trail frequency</div>
-            <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-              {["#2D6A4F", "#52B788", "#F4A261", "#E63946"].map((c) => (
-                <div key={c} style={{ width: "30px", height: "8px", background: c, borderRadius: "2px" }} />
-              ))}
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "2px", opacity: 0.5 }}>
-              <span>once</span><span>often</span>
-            </div>
-          </div>
-
-          {loading && <p style={{ opacity: 0.5 }}>Loading trails...</p>}
-          {filteredActivities.map((a) => (
-            <div
-              key={a.id}
-              onClick={() => handleSelectActivity(a)}
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: "8px", marginBottom: "1rem" }}>
+            <button
+              onClick={() => setActiveTab("my")}
               style={{
-                padding: "0.75rem",
-                marginBottom: "0.5rem",
-                background: selected === a.id ? "#2D6A4F" : "#2a2a2a",
-                borderRadius: "8px",
-                cursor: "pointer",
-                borderLeft: selected === a.id ? "3px solid #52B788" : "3px solid transparent",
+                flex: 1, padding: "8px", borderRadius: "8px", border: "none",
+                background: activeTab === "my" ? "#2D6A4F" : "#2a2a2a",
+                color: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600,
               }}
             >
-              <div style={{ fontWeight: 500 }}>{a.name}</div>
-              <div style={{ fontSize: "12px", opacity: 0.7 }}>
-                {(a.distance / 1000).toFixed(1)} km · {a.total_elevation_gain}m gain
+              🥾 My Trails
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab("suggested");
+                if (!showSuggested) {
+                  setShowSuggested(true);
+                  setTimeout(fetchSuggestedTrails, 100);
+                }
+              }}
+              style={{
+                flex: 1, padding: "8px", borderRadius: "8px", border: "none",
+                background: activeTab === "suggested" ? "#3B82F6" : "#2a2a2a",
+                color: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600,
+              }}
+            >
+              🗺️ Discover
+            </button>
+          </div>
+
+          {activeTab === "my" && (
+            <>
+              <div style={{ marginBottom: "1rem", padding: "0.75rem", background: "#2a2a2a", borderRadius: "8px", fontSize: "11px" }}>
+                <div style={{ marginBottom: "4px", opacity: 0.7 }}>Trail frequency</div>
+                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                  {["#2D6A4F", "#52B788", "#F4A261", "#E63946"].map((c) => (
+                    <div key={c} style={{ width: "30px", height: "8px", background: c, borderRadius: "2px" }} />
+                  ))}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: "2px", opacity: 0.5 }}>
+                  <span>once</span><span>often</span>
+                </div>
               </div>
-              <div style={{ fontSize: "12px", opacity: 0.5 }}>
-                {new Date(a.start_date).toLocaleDateString()}
+              {loading && <p style={{ opacity: 0.5 }}>Loading trails...</p>}
+              {filteredActivities.map((a) => (
+                <div
+                  key={a.id}
+                  onClick={() => handleSelectActivity(a)}
+                  style={{
+                    padding: "0.75rem", marginBottom: "0.5rem",
+                    background: selected === a.id ? "#2D6A4F" : "#2a2a2a",
+                    borderRadius: "8px", cursor: "pointer",
+                    borderLeft: selected === a.id ? "3px solid #52B788" : "3px solid transparent",
+                  }}
+                >
+                  <div style={{ fontWeight: 500 }}>{a.name}</div>
+                  <div style={{ fontSize: "12px", opacity: 0.7 }}>
+                    {(a.distance / 1000).toFixed(1)} km · {a.total_elevation_gain}m gain
+                  </div>
+                  <div style={{ fontSize: "12px", opacity: 0.5 }}>
+                    {new Date(a.start_date).toLocaleDateString()}
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+
+          {activeTab === "suggested" && (
+            <>
+              <button
+                onClick={fetchSuggestedTrails}
+                style={{
+                  width: "100%", padding: "8px", borderRadius: "8px", border: "none",
+                  background: "#3B82F6", color: "white", cursor: "pointer",
+                  fontSize: "12px", fontWeight: 600, marginBottom: "1rem",
+                }}
+              >
+                {loadingSuggested ? "Loading..." : "🔄 Refresh for current area"}
+              </button>
+
+              <div style={{ marginBottom: "0.75rem", padding: "0.75rem", background: "#2a2a2a", borderRadius: "8px", fontSize: "11px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div style={{ width: "24px", height: "3px", background: "#3B82F6", borderTop: "2px dashed #3B82F6" }} />
+                  <span style={{ opacity: 0.7 }}>Suggested trails from OSM</span>
+                </div>
               </div>
-            </div>
-          ))}
+
+              {loadingSuggested && <p style={{ opacity: 0.5 }}>Fetching trails...</p>}
+              {!loadingSuggested && filteredSuggested.length === 0 && (
+                <p style={{ opacity: 0.5, fontSize: "12px" }}>No trails found in this area. Try zooming out or moving the map.</p>
+              )}
+              {filteredSuggested.map((t) => (
+                <div
+                  key={t.id}
+                  style={{
+                    padding: "0.75rem", marginBottom: "0.5rem",
+                    background: "#2a2a2a", borderRadius: "8px",
+                    borderLeft: "3px solid #3B82F6",
+                  }}
+                >
+                  <div style={{ fontWeight: 500, fontSize: "13px" }}>{t.name}</div>
+                  <div style={{ fontSize: "12px", opacity: 0.7 }}>
+                    {t.distance ? `${t.distance} km` : ""}
+                    {t.distance && t.ascent ? " · " : ""}
+                    {t.ascent ? `${t.ascent}m gain` : ""}
+                  </div>
+                  {t.difficulty && (
+                    <div style={{ fontSize: "11px", opacity: 0.5 }}>
+                      {t.difficulty.replace(/_/g, " ")}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
         </div>
       )}
 
