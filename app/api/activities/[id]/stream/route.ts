@@ -22,56 +22,6 @@ interface OSMRelation {
 
 type OSMElement = OSMNode | OSMWay | OSMRelation;
 
-function stitchWays(wayCoords: number[][][]): number[][] {
-  if (wayCoords.length === 0) return [];
-  if (wayCoords.length === 1) return wayCoords[0];
-
-  const result = [...wayCoords[0]];
-  const remaining = wayCoords.slice(1);
-
-  while (remaining.length > 0) {
-    const lastPoint = result[result.length - 1];
-    let bestIndex = -1;
-    let bestReverse = false;
-    let bestDist = Infinity;
-
-    // Find the next way that connects to the current end point
-    remaining.forEach((way, i) => {
-      const firstPoint = way[0];
-      const lastWayPoint = way[way.length - 1];
-
-      const distToFirst = Math.abs(lastPoint[0] - firstPoint[0]) + Math.abs(lastPoint[1] - firstPoint[1]);
-      const distToLast = Math.abs(lastPoint[0] - lastWayPoint[0]) + Math.abs(lastPoint[1] - lastWayPoint[1]);
-
-      if (distToFirst < bestDist) {
-        bestDist = distToFirst;
-        bestIndex = i;
-        bestReverse = false;
-      }
-      if (distToLast < bestDist) {
-        bestDist = distToLast;
-        bestIndex = i;
-        bestReverse = true;
-      }
-    });
-
-    if (bestIndex === -1) break;
-
-    const nextWay = remaining.splice(bestIndex, 1)[0];
-    const coords = bestReverse ? [...nextWay].reverse() : nextWay;
-
-    // Only connect if reasonably close (within ~2km), otherwise start new segment
-    if (bestDist < 0.02) {
-      result.push(...coords.slice(1));
-    } else {
-      // Gap too large — skip this disconnected segment
-      break;
-    }
-  }
-
-  return result;
-}
-
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const north = searchParams.get("north");
@@ -125,8 +75,8 @@ export async function GET(request: Request) {
         (el as OSMRelation).tags?.name
       )
       .map((rel: OSMRelation) => {
-        // Build individual way coordinate arrays
-        const wayCoords: number[][][] = rel.members
+        // Keep each way as a separate segment — no stitching
+        const segments: number[][][] = rel.members
           .filter((m) => m.type === "way")
           .map((m) => {
             const nodes = wayMap[m.ref] || [];
@@ -139,9 +89,6 @@ export async function GET(request: Request) {
           })
           .filter((coords) => coords.length >= 2);
 
-        // Stitch ways together properly
-        const coordinates = stitchWays(wayCoords);
-
         return {
           id: rel.id,
           name: rel.tags.name,
@@ -150,10 +97,10 @@ export async function GET(request: Request) {
           difficulty: rel.tags.sac_scale || null,
           description: rel.tags.description || null,
           osm_url: `https://www.openstreetmap.org/relation/${rel.id}`,
-          coordinates,
+          segments,
         };
       })
-      .filter((t: { coordinates: number[][] }) => t.coordinates.length > 1);
+      .filter((t: { segments: number[][][] }) => t.segments.length > 0);
 
     return NextResponse.json(trails);
   } catch (error) {
