@@ -152,7 +152,7 @@ export default function TrailMap() {
   }, []);
 
   const fetchSuggestedTrails = useCallback(() => {
-    if (!map.current || !showSuggested) return;
+    if (!map.current) return;
     const bounds = map.current.getBounds();
     if (!bounds) return;
     setLoadingSuggested(true);
@@ -161,11 +161,11 @@ export default function TrailMap() {
     )
       .then((r) => r.json())
       .then((trails: SuggestedTrail[]) => {
-        setSuggestedTrails(trails);
+        setSuggestedTrails(Array.isArray(trails) ? trails : []);
         setLoadingSuggested(false);
       })
       .catch(() => setLoadingSuggested(false));
-  }, [showSuggested]);
+  }, []);
 
   useEffect(() => {
     if (!mapContainer.current || activities.length === 0) return;
@@ -351,8 +351,6 @@ export default function TrailMap() {
       if (map.current!.getSource(`suggested-${id}`)) map.current!.removeSource(`suggested-${id}`);
     });
     suggestedLayerIds.current.clear();
-
-    if (!showSuggested) return;
 
     let layerIndex = 0;
     filteredSuggested.forEach((trail) => {
@@ -638,13 +636,11 @@ export default function TrailMap() {
               🥾 My Trails
             </button>
             <button
-              onClick={() => {
+            onClick={() => {
                 setActiveTab("suggested");
-                if (!showSuggested) {
-                  setShowSuggested(true);
-                  setTimeout(fetchSuggestedTrails, 100);
-                }
-              }}
+                setShowSuggested(true);
+                setTimeout(fetchSuggestedTrails, 100);
+            }}
               style={{
                 flex: 1, padding: "8px", borderRadius: "8px", border: "none",
                 background: activeTab === "suggested" ? "#3B82F6" : "#2a2a2a",
