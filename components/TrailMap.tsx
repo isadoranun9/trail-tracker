@@ -118,6 +118,7 @@ export default function TrailMap() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const hoveredId = useRef<number | null>(null);
+  const hoveredSuggestedId = useRef<number | null>(null);
   const repeatCounts = useRef<Record<number, number>>({});
   const suggestedLayerIds = useRef<Set<number>>(new Set());
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -132,6 +133,7 @@ export default function TrailMap() {
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [suggestedFilters, setSuggestedFilters] = useState<SuggestedFilters>(defaultSuggestedFilters);
   const [activeTab, setActiveTab] = useState<"my" | "suggested">("my");
+  const [filterTab, setFilterTab] = useState<"my" | "suggested">("my");
 
   const filteredActivities = applyFilters(activities, filters);
   const filteredSuggested = applySuggestedFilters(suggestedTrails, suggestedFilters);
@@ -151,7 +153,6 @@ export default function TrailMap() {
     if (!map.current || !showSuggested) return;
     const bounds = map.current.getBounds();
     if (!bounds) return;
-
     setLoadingSuggested(true);
     fetch(
       `/api/suggested-trails?north=${bounds.getNorth()}&south=${bounds.getSouth()}&east=${bounds.getEast()}&west=${bounds.getWest()}`
@@ -351,6 +352,7 @@ export default function TrailMap() {
 
     if (!showSuggested) return;
 
+    let layerIndex = 0;
     filteredSuggested.forEach((trail) => {
       if (trail.coordinates.length < 2) return;
 
@@ -378,12 +380,30 @@ export default function TrailMap() {
         paint: {
           "line-color": "#3B82F6",
           "line-width": 2,
-          "line-opacity": 0.8,
+          "line-opacity": 0.7,
           "line-dasharray": [2, 2],
+          "line-offset": (layerIndex % 3) * 2,
         },
       });
 
+      layerIndex++;
+
       map.current!.on("click", `suggested-hit-${trail.id}`, (e) => {
+        // Reset previously highlighted suggested trail
+        if (hoveredSuggestedId.current !== null) {
+          if (map.current!.getLayer(`suggested-${hoveredSuggestedId.current}`)) {
+            map.current!.setPaintProperty(`suggested-${hoveredSuggestedId.current}`, "line-color", "#3B82F6");
+            map.current!.setPaintProperty(`suggested-${hoveredSuggestedId.current}`, "line-width", 2);
+            map.current!.setPaintProperty(`suggested-${hoveredSuggestedId.current}`, "line-dasharray", [2, 2]);
+          }
+        }
+
+        // Highlight clicked trail
+        map.current!.setPaintProperty(`suggested-${trail.id}`, "line-color", "#FFD700");
+        map.current!.setPaintProperty(`suggested-${trail.id}`, "line-width", 4);
+        map.current!.setPaintProperty(`suggested-${trail.id}`, "line-dasharray", [1, 0]);
+        hoveredSuggestedId.current = trail.id;
+
         new mapboxgl.Popup({ offset: 12, closeButton: true })
           .setLngLat(e.lngLat)
           .setHTML(`
@@ -509,15 +529,14 @@ export default function TrailMap() {
           padding: "1rem", width: "240px", boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
           maxHeight: "80vh", overflowY: "auto",
         }}>
-          {/* Tabs */}
           <div style={{ display: "flex", gap: "8px", marginBottom: "1rem" }}>
             {(["my", "suggested"] as const).map((tab) => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => setFilterTab(tab)}
                 style={{
                   flex: 1, padding: "6px", borderRadius: "6px", border: "none",
-                  background: activeTab === tab ? "#2D6A4F" : "#1a1a1a",
+                  background: filterTab === tab ? "#2D6A4F" : "#1a1a1a",
                   color: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600,
                 }}
               >
@@ -526,13 +545,12 @@ export default function TrailMap() {
             ))}
           </div>
 
-          {activeTab === "my" && (
+          {filterTab === "my" && (
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
                 <span style={{ fontWeight: 600, fontSize: "14px" }}>My Trail Filters</span>
                 <button onClick={() => setFilters(defaultFilters)} style={{ fontSize: "11px", background: "none", border: "none", color: "#52B788", cursor: "pointer" }}>Clear</button>
               </div>
-
               <div style={{ marginBottom: "0.75rem" }}>
                 <label style={labelStyle}>Search by name</label>
                 <input style={inputStyle} placeholder="e.g. Cerro..." value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} />
@@ -561,13 +579,12 @@ export default function TrailMap() {
             </>
           )}
 
-          {activeTab === "suggested" && (
+          {filterTab === "suggested" && (
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
                 <span style={{ fontWeight: 600, fontSize: "14px" }}>Suggested Filters</span>
                 <button onClick={() => setSuggestedFilters(defaultSuggestedFilters)} style={{ fontSize: "11px", background: "none", border: "none", color: "#52B788", cursor: "pointer" }}>Clear</button>
               </div>
-
               <div style={{ marginBottom: "0.75rem" }}>
                 <label style={labelStyle}>Distance (km)</label>
                 <div style={{ display: "flex", gap: "6px" }}>
@@ -582,7 +599,7 @@ export default function TrailMap() {
               <div style={{ marginBottom: "0.75rem" }}>
                 <label style={labelStyle}>Difficulty</label>
                 <select
-                  style={{ ...inputStyle }}
+                  style={inputStyle}
                   value={suggestedFilters.difficulty}
                   onChange={(e) => setSuggestedFilters({ ...suggestedFilters, difficulty: e.target.value })}
                 >
@@ -593,7 +610,7 @@ export default function TrailMap() {
                   <option value="alpine_hiking">Alpine hiking</option>
                 </select>
               </div>
-              <div style={{ fontSize: "11px", opacity: 0.5, textAlign: "center", marginBottom: "0.75rem" }}>
+              <div style={{ fontSize: "11px", opacity: 0.5, textAlign: "center" }}>
                 Showing {filteredSuggested.length} of {suggestedTrails.length} suggested
               </div>
             </>
@@ -604,8 +621,6 @@ export default function TrailMap() {
       {/* Sidebar */}
       {sidebarOpen && (
         <div style={{ width: "280px", overflowY: "auto", padding: "1rem", background: "#1a1a1a", color: "white", flexShrink: 0 }}>
-
-          {/* Tabs */}
           <div style={{ display: "flex", gap: "8px", marginBottom: "1rem" }}>
             <button
               onClick={() => setActiveTab("my")}
@@ -687,14 +702,14 @@ export default function TrailMap() {
 
               <div style={{ marginBottom: "0.75rem", padding: "0.75rem", background: "#2a2a2a", borderRadius: "8px", fontSize: "11px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <div style={{ width: "24px", height: "3px", background: "#3B82F6", borderTop: "2px dashed #3B82F6" }} />
+                  <div style={{ width: "24px", height: "0", borderTop: "2px dashed #3B82F6" }} />
                   <span style={{ opacity: 0.7 }}>Suggested trails from OSM</span>
                 </div>
               </div>
 
               {loadingSuggested && <p style={{ opacity: 0.5 }}>Fetching trails...</p>}
               {!loadingSuggested && filteredSuggested.length === 0 && (
-                <p style={{ opacity: 0.5, fontSize: "12px" }}>No trails found in this area. Try zooming out or moving the map.</p>
+                <p style={{ opacity: 0.5, fontSize: "12px" }}>No trails found. Try zooming out or moving the map then hit refresh.</p>
               )}
               {filteredSuggested.map((t) => (
                 <div
