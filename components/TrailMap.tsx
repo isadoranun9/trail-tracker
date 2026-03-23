@@ -152,7 +152,26 @@ export default function TrailMap() {
   }, []);
 
   const fetchSuggestedTrails = useCallback(() => {
-    if (!map.current) return;
+    if (!map.current || !mapReady) {
+      // Map not ready yet — retry after a short delay
+      setTimeout(() => {
+        if (!map.current) return;
+        const bounds = map.current.getBounds();
+        if (!bounds) return;
+        setLoadingSuggested(true);
+        fetch(
+          `/api/suggested-trails?north=${bounds.getNorth()}&south=${bounds.getSouth()}&east=${bounds.getEast()}&west=${bounds.getWest()}`
+        )
+          .then((r) => r.json())
+          .then((trails: SuggestedTrail[]) => {
+            setSuggestedTrails(Array.isArray(trails) ? trails : []);
+            setLoadingSuggested(false);
+          })
+          .catch(() => setLoadingSuggested(false));
+      }, 1000);
+      return;
+    }
+  
     const bounds = map.current.getBounds();
     if (!bounds) return;
     setLoadingSuggested(true);
@@ -165,7 +184,7 @@ export default function TrailMap() {
         setLoadingSuggested(false);
       })
       .catch(() => setLoadingSuggested(false));
-  }, []);
+  }, [mapReady]);
 
   useEffect(() => {
     if (!mapContainer.current || activities.length === 0) return;
