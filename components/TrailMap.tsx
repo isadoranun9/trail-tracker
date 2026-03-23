@@ -363,6 +363,12 @@ export default function TrailMap() {
   useEffect(() => {
     if (!mapReady || !map.current) return;
 
+    console.log("suggested useEffect fired", {
+        mapReady,
+        filteredSuggestedCount: filteredSuggested.length,
+        suggestedTrailsCount: suggestedTrails.length,
+      });
+
     // Remove old suggested layers
     suggestedLayerIds.current.forEach((id) => {
       if (map.current!.getLayer(`suggested-hit-${id}`)) map.current!.removeLayer(`suggested-hit-${id}`);

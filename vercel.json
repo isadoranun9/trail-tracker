@@ -1,0 +1,7 @@
+{
+    "functions": {
+      "app/api/suggested-trails/route.ts": {
+        "maxDuration": 30
+      }
+    }
+  }
