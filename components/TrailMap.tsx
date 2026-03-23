@@ -354,16 +354,16 @@ export default function TrailMap() {
 
     let layerIndex = 0;
     filteredSuggested.forEach((trail) => {
-        if (trail.segments.length < 1) return;
+        if (!trail.segments || trail.segments.length < 1) return;
 
-      const geojson: GeoJSON.Feature = {
-        type: "Feature",
-        properties: { id: trail.id, name: trail.name },
-        geometry: {
-          type: "MultiLineString",
-          coordinates: trail.segments,
-        },
-      };
+        const geojson: GeoJSON.Feature = {
+            type: "Feature",
+            properties: { id: trail.id, name: trail.name },
+            geometry: {
+              type: "MultiLineString",
+              coordinates: trail.segments || [],
+            },
+          };
 
       map.current!.addSource(`suggested-${trail.id}`, { type: "geojson", data: geojson });
 
