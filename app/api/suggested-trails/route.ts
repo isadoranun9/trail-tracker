@@ -75,43 +75,38 @@ export async function GET(request: Request) {
 
   // Use out geom to get geometry inline — much faster than resolving nodes separately
   const query = `
-    [out:json][timeout:15];
-    relation
-      ["route"="hiking"]
-      ["name"]
-      (${clampedSouth},${clampedWest},${clampedNorth},${clampedEast});
-    out geom tags;
-  `;
+  [out:json][timeout:15];
+  way
+    ["highway"="path"]
+    ["sac_scale"]
+    (${clampedSouth},${clampedWest},${clampedNorth},${clampedEast});
+  out geom tags;
+`;
 
   try {
     const response = await fetchOverpass(query);
     const data = await response.json();
 
     const trails = data.elements
-      .filter((el: OSMElement) =>
-        el.type === "relation" &&
-        (el as OSMRelation).tags?.route === "hiking" &&
-        (el as OSMRelation).tags?.name
-      )
-      .map((rel: OSMRelation) => {
-        const segments: number[][][] = (rel.members || [])
-          .filter((m) => m.type === "way" && m.geometry && m.geometry.length >= 2)
-          .map((m) =>
-            (m.geometry || []).map((pt) => [pt.lon, pt.lat])
-          );
-
-        return {
-          id: rel.id,
-          name: rel.tags.name,
-          distance: rel.tags.distance || null,
-          ascent: rel.tags.ascent || null,
-          difficulty: rel.tags.sac_scale || null,
-          description: rel.tags.description || null,
-          osm_url: `https://www.openstreetmap.org/relation/${rel.id}`,
-          segments,
-        };
-      })
-      .filter((t: { segments: number[][][] }) => t.segments.length > 0);
+    .filter((el: OSMElement) =>
+      el.type === "way" &&
+      (el as OSMWay).geometry &&
+      (el as OSMWay).geometry!.length >= 2
+    )
+    .map((way: OSMWay) => {
+      const coordinates = (way.geometry || []).map((pt) => [pt.lon, pt.lat]);
+      return {
+        id: way.id,
+        name: way.tags?.name || "Unnamed trail",
+        distance: null,
+        ascent: null,
+        difficulty: way.tags?.sac_scale || null,
+        description: way.tags?.description || null,
+        osm_url: `https://www.openstreetmap.org/way/${way.id}`,
+        segments: [coordinates],
+      };
+    })
+    .filter((t: { segments: number[][][] }) => t.segments[0].length > 1);
 
     return NextResponse.json(trails);
   } catch (error) {
