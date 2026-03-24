@@ -22,6 +22,31 @@ interface OSMRelation {
 
 type OSMElement = OSMNode | OSMWay | OSMRelation;
 
+async function fetchOverpass(query: string): Promise<Response> {
+    const endpoints = [
+      "https://overpass.kumi.systems/api/interpreter",
+      "https://overpass-api.de/api/interpreter",
+      "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    ];
+  
+    for (const endpoint of endpoints) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
+        const response = await fetch(endpoint, {
+          method: "POST",
+          body: query,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (response.ok) return response;
+      } catch {
+        console.log(`Endpoint ${endpoint} failed, trying next...`);
+      }
+    }
+    throw new Error("All Overpass endpoints failed");
+  }
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const north = parseFloat(searchParams.get("north") || "");
@@ -59,8 +84,7 @@ export async function GET(request: Request) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-    const response = await fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
+    const response = await fetch("https://overpass.kumi.systems/api/interpreter", {      method: "POST",
       body: query,
       signal: controller.signal,
     });
@@ -92,8 +116,8 @@ export async function GET(request: Request) {
         (el as OSMRelation).tags?.name
       )
       .map((rel: OSMRelation) => {
-        const segments: number[][][] = rel.members
-          .filter((m) => m.type === "way")
+        const segments: number[][][] = (rel.members || [])
+  .filter((m) => m.type === "way")
           .map((m) => {
             const nodes = wayMap[m.ref] || [];
             return nodes
