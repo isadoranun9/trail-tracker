@@ -166,16 +166,54 @@ export default function TrailMap() {
     const bounds = map.current.getBounds();
     if (!bounds) return;
   
+    const centerLat = (bounds.getNorth() + bounds.getSouth()) / 2;
+    const centerLng = (bounds.getEast() + bounds.getWest()) / 2;
+    const maxDelta = 0.15;
+    const s = centerLat - maxDelta;
+    const n = centerLat + maxDelta;
+    const w = centerLng - maxDelta;
+    const e = centerLng + maxDelta;
+  
+    const query = `
+      [out:json][timeout:25];
+      way["highway"="path"]["sac_scale"](${s},${w},${n},${e});
+      out geom tags;
+    `;
+  
     setLoadingSuggested(true);
-    fetch(
-      `/api/suggested-trails?north=${bounds.getNorth()}&south=${bounds.getSouth()}&east=${bounds.getEast()}&west=${bounds.getWest()}`
-    )
+  
+    fetch("https://overpass.kumi.systems/api/interpreter", {
+      method: "POST",
+      body: query,
+    })
       .then((r) => r.json())
-      .then((trails: SuggestedTrail[]) => {
-        setSuggestedTrails(Array.isArray(trails) ? trails : []);
+      .then((data) => {
+        const trails: SuggestedTrail[] = (data.elements || [])
+          .filter((el: { type: string; geometry?: { lat: number; lon: number }[] }) =>
+            el.type === "way" && el.geometry && el.geometry.length >= 2
+          )
+          .map((way: {
+            id: number;
+            tags?: Record<string, string>;
+            geometry: { lat: number; lon: number }[];
+          }) => ({
+            id: way.id,
+            name: way.tags?.name || "Unnamed trail",
+            distance: null,
+            ascent: null,
+            difficulty: way.tags?.sac_scale || null,
+            description: way.tags?.description || null,
+            osm_url: `https://www.openstreetmap.org/way/${way.id}`,
+            segments: [way.geometry.map((pt) => [pt.lon, pt.lat])],
+          }));
+  
+        setSuggestedTrails(trails);
         setLoadingSuggested(false);
       })
-      .catch(() => setLoadingSuggested(false));
+      .catch((err) => {
+        console.error("Overpass error:", err);
+        setLoadingSuggested(false);
+      });
   }, [mapReady]);
 
   useEffect(() => {
