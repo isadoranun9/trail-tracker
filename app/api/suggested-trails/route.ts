@@ -30,11 +30,11 @@ interface OSMRelation {
 type OSMElement = OSMNode | OSMWay | OSMRelation;
 
 async function fetchOverpass(query: string): Promise<Response> {
-  const endpoints = [
-    "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass-api.de/api/interpreter",
-    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-  ];
+    const endpoints = [
+        "https://overpass.openstreetmap.ru/cgi/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass-api.de/api/interpreter",
+      ];
 
   for (const endpoint of endpoints) {
     try {
