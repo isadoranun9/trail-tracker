@@ -178,16 +178,55 @@ export default function TrailMap() {
     const bounds = map.current.getBounds();
     if (!bounds) return;
   
+    const centerLat = (bounds.getNorth() + bounds.getSouth()) / 2;
+    const centerLng = (bounds.getEast() + bounds.getWest()) / 2;
+    const maxDelta = 0.08;
+    const s = centerLat - maxDelta;
+    const n = centerLat + maxDelta;
+    const w = centerLng - maxDelta;
+    const e = centerLng + maxDelta;
+  
+    const query = `[out:json][timeout:30];relation["route"="hiking"]["name"](${s},${w},${n},${e});out geom tags;`;
+  
     setLoadingSuggested(true);
-    fetch(
-      `/api/suggested-trails?north=${bounds.getNorth()}&south=${bounds.getSouth()}&east=${bounds.getEast()}&west=${bounds.getWest()}`
-    )
+  
+    fetch("https://overpass.kumi.systems/api/interpreter", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `data=${encodeURIComponent(query)}`,
+    })
       .then((r) => r.json())
-      .then((trails: SuggestedTrail[]) => {
-        setSuggestedTrails(Array.isArray(trails) ? trails : []);
+      .then((data) => {
+        const trails: SuggestedTrail[] = (data.elements || [])
+          .filter((el: { type: string; tags?: Record<string, string>; members?: { type: string; geometry?: { lat: number; lon: number }[] }[] }) =>
+            el.type === "relation" &&
+            el.tags?.route === "hiking" &&
+            el.tags?.name
+          )
+          .map((rel: { id: number; tags: Record<string, string>; members: { type: string; geometry?: { lat: number; lon: number }[] }[] }) => {
+            const segments: number[][][] = (rel.members || [])
+              .filter((m) => m.type === "way" && m.geometry && m.geometry.length >= 2)
+              .map((m) => (m.geometry || []).map((pt) => [pt.lon, pt.lat]));
+            return {
+              id: rel.id,
+              name: rel.tags.name,
+              distance: rel.tags.distance || null,
+              ascent: rel.tags.ascent || null,
+              difficulty: rel.tags.sac_scale || null,
+              description: rel.tags.description || null,
+              osm_url: `https://www.openstreetmap.org/relation/${rel.id}`,
+              segments,
+            };
+          })
+          .filter((t: { segments: number[][][] }) => t.segments.length > 0);
+  
+        setSuggestedTrails(trails);
         setLoadingSuggested(false);
       })
-      .catch(() => setLoadingSuggested(false));
+      .catch((err) => {
+        console.error("Overpass error:", err);
+        setLoadingSuggested(false);
+      });
   }, [mapReady]);
 
   useEffect(() => {
@@ -720,16 +759,17 @@ export default function TrailMap() {
           {activeTab === "suggested" && (
             <>
 
-
-              <button
+<button
   onClick={fetchSuggestedTrails}
+  disabled={loadingSuggested}
   style={{
     width: "100%", padding: "8px", borderRadius: "8px", border: "none",
-    background: "#3B82F6", color: "white", cursor: "pointer",
+    background: loadingSuggested ? "#555" : "#3B82F6",
+    color: "white", cursor: loadingSuggested ? "not-allowed" : "pointer",
     fontSize: "12px", fontWeight: 600, marginBottom: "0.5rem",
   }}
 >
-  {loadingSuggested ? "Loading..." : "🔄 Refresh for current area"}
+  {loadingSuggested ? "⏳ Loading trails (may take ~30s)..." : "🔄 Refresh for current area"}
 </button>
 <p style={{ fontSize: "11px", opacity: 0.5, marginBottom: "0.75rem" }}>
   Zoom in to a specific area first for best results
