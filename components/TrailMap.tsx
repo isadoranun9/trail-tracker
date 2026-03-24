@@ -153,27 +153,19 @@ export default function TrailMap() {
 
   const fetchSuggestedTrails = useCallback(() => {
     if (!map.current || !mapReady) {
-      // Map not ready yet — retry after a short delay
-      setTimeout(() => {
-        if (!map.current) return;
-        const bounds = map.current.getBounds();
-        if (!bounds) return;
-        setLoadingSuggested(true);
-        fetch(
-          `/api/suggested-trails?north=${bounds.getNorth()}&south=${bounds.getSouth()}&east=${bounds.getEast()}&west=${bounds.getWest()}`
-        )
-          .then((r) => r.json())
-          .then((trails: SuggestedTrail[]) => {
-            setSuggestedTrails(Array.isArray(trails) ? trails : []);
-            setLoadingSuggested(false);
-          })
-          .catch(() => setLoadingSuggested(false));
-      }, 1000);
+      setTimeout(() => fetchSuggestedTrails(), 1000);
+      return;
+    }
+  
+    const zoom = map.current.getZoom();
+    if (zoom < 9) {
+      alert("Please zoom in more to see suggested trails!");
       return;
     }
   
     const bounds = map.current.getBounds();
     if (!bounds) return;
+  
     setLoadingSuggested(true);
     fetch(
       `/api/suggested-trails?north=${bounds.getNorth()}&south=${bounds.getSouth()}&east=${bounds.getEast()}&west=${bounds.getWest()}`
@@ -725,6 +717,20 @@ export default function TrailMap() {
               >
                 {loadingSuggested ? "Loading..." : "🔄 Refresh for current area"}
               </button>
+
+              <button
+  onClick={fetchSuggestedTrails}
+  style={{
+    width: "100%", padding: "8px", borderRadius: "8px", border: "none",
+    background: "#3B82F6", color: "white", cursor: "pointer",
+    fontSize: "12px", fontWeight: 600, marginBottom: "0.5rem",
+  }}
+>
+  {loadingSuggested ? "Loading..." : "🔄 Refresh for current area"}
+</button>
+<p style={{ fontSize: "11px", opacity: 0.5, marginBottom: "0.75rem" }}>
+  Zoom in to a specific area first for best results
+</p>
 
               <div style={{ marginBottom: "0.75rem", padding: "0.75rem", background: "#2a2a2a", borderRadius: "8px", fontSize: "11px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>

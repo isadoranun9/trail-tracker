@@ -70,7 +70,7 @@ export async function GET(request: Request) {
   // Clamp to small area
   const centerLat = (north + south) / 2;
   const centerLng = (east + west) / 2;
-  const maxDelta = 0.3;
+  const maxDelta = 0.15;
   const clampedSouth = centerLat - maxDelta;
   const clampedNorth = centerLat + maxDelta;
   const clampedWest = centerLng - maxDelta;
