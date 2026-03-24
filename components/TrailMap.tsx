@@ -183,9 +183,12 @@ export default function TrailMap() {
     setLoadingSuggested(true);
   
     fetch("https://overpass.kumi.systems/api/interpreter", {
-      method: "POST",
-      body: query,
-    })
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: `data=${encodeURIComponent(query)}`,
+      })
       .then((r) => r.json())
       .then((data) => {
         const trails: SuggestedTrail[] = (data.elements || [])
