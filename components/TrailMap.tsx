@@ -707,16 +707,7 @@ export default function TrailMap() {
 
           {activeTab === "suggested" && (
             <>
-              <button
-                onClick={fetchSuggestedTrails}
-                style={{
-                  width: "100%", padding: "8px", borderRadius: "8px", border: "none",
-                  background: "#3B82F6", color: "white", cursor: "pointer",
-                  fontSize: "12px", fontWeight: 600, marginBottom: "1rem",
-                }}
-              >
-                {loadingSuggested ? "Loading..." : "🔄 Refresh for current area"}
-              </button>
+
 
               <button
   onClick={fetchSuggestedTrails}
