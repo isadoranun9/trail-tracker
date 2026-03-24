@@ -8,11 +8,12 @@ interface OSMNode {
 }
 
 interface OSMWay {
-  type: "way";
-  id: number;
-  nodes: number[];
-  geometry?: { lat: number; lon: number }[];
-}
+    type: "way";
+    id: number;
+    nodes: number[];
+    tags?: Record<string, string>;
+    geometry?: { lat: number; lon: number }[];
+  }
 
 interface OSMRelation {
     type: "relation";
