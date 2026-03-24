@@ -11,6 +11,7 @@ interface OSMWay {
   type: "way";
   id: number;
   nodes: number[];
+  geometry?: { lat: number; lon: number }[];
 }
 
 interface OSMRelation {
@@ -23,29 +24,29 @@ interface OSMRelation {
 type OSMElement = OSMNode | OSMWay | OSMRelation;
 
 async function fetchOverpass(query: string): Promise<Response> {
-    const endpoints = [
-      "https://overpass.kumi.systems/api/interpreter",
-      "https://overpass-api.de/api/interpreter",
-      "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-    ];
-  
-    for (const endpoint of endpoints) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000);
-        const response = await fetch(endpoint, {
-          method: "POST",
-          body: query,
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        if (response.ok) return response;
-      } catch {
-        console.log(`Endpoint ${endpoint} failed, trying next...`);
-      }
+  const endpoints = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
+      const response = await fetch(endpoint, {
+        method: "POST",
+        body: query,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (response.ok) return response;
+    } catch {
+      console.log(`Endpoint ${endpoint} failed, trying next...`);
     }
-    throw new Error("All Overpass endpoints failed");
   }
+  throw new Error("All Overpass endpoints failed");
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -58,56 +59,28 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing bounds" }, { status: 400 });
   }
 
-  // Clamp the bounding box to max 1 degree in each direction
-  // to avoid querying too large an area
+  // Clamp to small area
   const centerLat = (north + south) / 2;
   const centerLng = (east + west) / 2;
-  const maxDelta = 0.5;
+  const maxDelta = 0.3;
   const clampedSouth = centerLat - maxDelta;
   const clampedNorth = centerLat + maxDelta;
   const clampedWest = centerLng - maxDelta;
   const clampedEast = centerLng + maxDelta;
 
+  // Use out geom to get geometry inline — much faster than resolving nodes separately
   const query = `
-    [out:json][timeout:20];
+    [out:json][timeout:15];
     relation
       ["route"="hiking"]
       ["name"]
       (${clampedSouth},${clampedWest},${clampedNorth},${clampedEast});
-    out tags;
-    out body;
-    >;
-    out skel qt;
+    out geom tags;
   `;
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
-
-    const response = await fetch("https://overpass.kumi.systems/api/interpreter", {      method: "POST",
-      body: query,
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      return NextResponse.json({ error: "Overpass API error" }, { status: response.status });
-    }
-
+    const response = await fetchOverpass(query);
     const data = await response.json();
-
-    const nodeMap: Record<number, { lat: number; lon: number }> = {};
-    const wayMap: Record<number, number[]> = {};
-
-    data.elements.forEach((el: OSMElement) => {
-      if (el.type === "node") {
-        nodeMap[el.id] = { lat: (el as OSMNode).lat, lon: (el as OSMNode).lon };
-      }
-      if (el.type === "way") {
-        wayMap[el.id] = (el as OSMWay).nodes;
-      }
-    });
 
     const trails = data.elements
       .filter((el: OSMElement) =>
@@ -115,19 +88,12 @@ export async function GET(request: Request) {
         (el as OSMRelation).tags?.route === "hiking" &&
         (el as OSMRelation).tags?.name
       )
-      .map((rel: OSMRelation) => {
+      .map((rel: OSMRelation & { members: { type: string; ref: number; role: string; geometry?: { lat: number; lon: number }[] }[] }) => {
         const segments: number[][][] = (rel.members || [])
-  .filter((m) => m.type === "way")
-          .map((m) => {
-            const nodes = wayMap[m.ref] || [];
-            return nodes
-              .map((nodeId) => {
-                const node = nodeMap[nodeId];
-                return node ? [node.lon, node.lat] : null;
-              })
-              .filter(Boolean) as number[][];
-          })
-          .filter((coords) => coords.length >= 2);
+          .filter((m) => m.type === "way" && m.geometry && m.geometry.length >= 2)
+          .map((m) =>
+            (m.geometry || []).map((pt) => [pt.lon, pt.lat])
+          );
 
         return {
           id: rel.id,
