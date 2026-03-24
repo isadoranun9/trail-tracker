@@ -1,3 +1,5 @@
+export const revalidate = 3600; // Cache for 1 hour
+
 import { NextResponse } from "next/server";
 
 interface OSMNode {
@@ -39,7 +41,7 @@ async function fetchOverpass(query: string): Promise<Response> {
   for (const endpoint of endpoints) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000);
+      const timeoutId = setTimeout(() => controller.abort(), 40000);
       const response = await fetch(endpoint, {
         method: "POST",
         body: query,
