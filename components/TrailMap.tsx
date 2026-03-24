@@ -143,11 +143,23 @@ export default function TrailMap() {
   const activeSuggestedFilterCount = Object.values(suggestedFilters).filter((v) => v !== "").length;
 
   useEffect(() => {
+    const cached = localStorage.getItem("trail-activities");
+    const cachedTime = localStorage.getItem("trail-activities-time");
+    const oneHour = 60 * 60 * 1000;
+  
+    if (cached && cachedTime && Date.now() - parseInt(cachedTime) < oneHour) {
+      setActivities(JSON.parse(cached));
+      setLoading(false);
+      return;
+    }
+  
     fetch("/api/activities")
       .then((r) => r.json())
       .then((data) => {
         setActivities(data);
         setLoading(false);
+        localStorage.setItem("trail-activities", JSON.stringify(data));
+        localStorage.setItem("trail-activities-time", Date.now().toString());
       });
   }, []);
 
