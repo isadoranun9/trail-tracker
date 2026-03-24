@@ -15,11 +15,16 @@ interface OSMWay {
 }
 
 interface OSMRelation {
-  type: "relation";
-  id: number;
-  tags: Record<string, string>;
-  members: { type: string; ref: number; role: string }[];
-}
+    type: "relation";
+    id: number;
+    tags: Record<string, string>;
+    members: {
+      type: string;
+      ref: number;
+      role: string;
+      geometry?: { lat: number; lon: number }[];
+    }[];
+  }
 
 type OSMElement = OSMNode | OSMWay | OSMRelation;
 
@@ -88,7 +93,7 @@ export async function GET(request: Request) {
         (el as OSMRelation).tags?.route === "hiking" &&
         (el as OSMRelation).tags?.name
       )
-      .map((rel: OSMRelation & { members: { type: string; ref: number; role: string; geometry?: { lat: number; lon: number }[] }[] }) => {
+      .map((rel: OSMRelation) => {
         const segments: number[][][] = (rel.members || [])
           .filter((m) => m.type === "way" && m.geometry && m.geometry.length >= 2)
           .map((m) =>
