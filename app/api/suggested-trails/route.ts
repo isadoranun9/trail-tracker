@@ -1,60 +1,6 @@
-export const revalidate = 3600; // Cache for 1 hour
+export const revalidate = 3600;
 
 import { NextResponse } from "next/server";
-
-interface OSMNode {
-  type: "node";
-  id: number;
-  lat: number;
-  lon: number;
-}
-
-interface OSMWay {
-    type: "way";
-    id: number;
-    nodes: number[];
-    tags?: Record<string, string>;
-    geometry?: { lat: number; lon: number }[];
-  }
-
-interface OSMRelation {
-    type: "relation";
-    id: number;
-    tags: Record<string, string>;
-    members: {
-      type: string;
-      ref: number;
-      role: string;
-      geometry?: { lat: number; lon: number }[];
-    }[];
-  }
-
-type OSMElement = OSMNode | OSMWay | OSMRelation;
-
-async function fetchOverpass(query: string): Promise<Response> {
-  const endpoints = [
-    "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass-api.de/api/interpreter",
-    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-  ];
-
-  for (const endpoint of endpoints) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 40000);
-      const response = await fetch(endpoint, {
-        method: "POST",
-        body: query,
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      if (response.ok) return response;
-    } catch {
-      console.log(`Endpoint ${endpoint} failed, trying next...`);
-    }
-  }
-  throw new Error("All Overpass endpoints failed");
-}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -76,44 +22,65 @@ export async function GET(request: Request) {
   const clampedWest = centerLng - maxDelta;
   const clampedEast = centerLng + maxDelta;
 
-  // Use out geom to get geometry inline — much faster than resolving nodes separately
-  const query = `
-  [out:json][timeout:15];
-  way
-    ["highway"="path"]
-    ["sac_scale"]
-    (${clampedSouth},${clampedWest},${clampedNorth},${clampedEast});
-  out geom tags;
-`;
-
   try {
-    const response = await fetchOverpass(query);
-    const data = await response.json();
+    // Step 1 — get list of routes in the bounding box
+    const listUrl = `https://hiking.waymarkedtrails.org/api/v1/list/by_area?bbox=${clampedWest},${clampedSouth},${clampedEast},${clampedNorth}&limit=20`;
 
-    const trails = data.elements
-    .filter((el: OSMElement) =>
-      el.type === "way" &&
-      (el as OSMWay).geometry &&
-      (el as OSMWay).geometry!.length >= 2
-    )
-    .map((way: OSMWay) => {
-      const coordinates = (way.geometry || []).map((pt) => [pt.lon, pt.lat]);
-      return {
-        id: way.id,
-        name: way.tags?.name || "Unnamed trail",
-        distance: null,
-        ascent: null,
-        difficulty: way.tags?.sac_scale || null,
-        description: way.tags?.description || null,
-        osm_url: `https://www.openstreetmap.org/way/${way.id}`,
-        segments: [coordinates],
-      };
-    })
-    .filter((t: { segments: number[][][] }) => t.segments[0].length > 1);
+    const listRes = await fetch(listUrl, {
+      headers: { "Accept": "application/json" },
+    });
 
-    return NextResponse.json(trails);
+    if (!listRes.ok) {
+      return NextResponse.json({ error: "Waymarked Trails API error" }, { status: listRes.status });
+    }
+
+    const listData = await listRes.json();
+    const routes = listData.results || [];
+
+    // Step 2 — fetch geometry for each route in parallel
+    const trails = await Promise.all(
+      routes.map(async (route: { id: number; name: string; ref?: string; itinerary?: string }) => {
+        try {
+          const geoRes = await fetch(
+            `https://hiking.waymarkedtrails.org/api/v1/details/relation/${route.id}/geometry/geojson`
+          );
+          if (!geoRes.ok) return null;
+          const geo = await geoRes.json();
+
+          const segments: number[][][] = [];
+
+          if (geo.type === "LineString") {
+            segments.push(geo.coordinates);
+          } else if (geo.type === "MultiLineString") {
+            segments.push(...geo.coordinates);
+          } else if (geo.type === "GeometryCollection") {
+            geo.geometries?.forEach((g: { type: string; coordinates: number[][] | number[][][] }) => {
+              if (g.type === "LineString") segments.push(g.coordinates as number[][]);
+              if (g.type === "MultiLineString") segments.push(...(g.coordinates as number[][][]));
+            });
+          }
+
+          return {
+            id: route.id,
+            name: route.name || route.ref || "Unnamed trail",
+            distance: null,
+            ascent: null,
+            difficulty: null,
+            description: route.itinerary || null,
+            osm_url: `https://www.openstreetmap.org/relation/${route.id}`,
+            segments,
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    const validTrails = trails.filter((t) => t && t.segments.length > 0);
+    return NextResponse.json(validTrails);
+
   } catch (error) {
-    console.error("Overpass error:", error);
+    console.error("Waymarked Trails error:", error);
     return NextResponse.json({ error: "Failed to fetch trails" }, { status: 500 });
   }
 }
