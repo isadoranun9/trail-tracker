@@ -175,7 +175,6 @@ export default function TrailMap() {
     const query = `[out:json][timeout:30];relation["route"="hiking"]["name"](${s},${w},${n},${e});out body geom;`;
     const encodedQuery = `data=${encodeURIComponent(query)}`;
     const endpoints = [
-      "https://overpass.kumi.systems/api/interpreter",
       "https://overpass-api.de/api/interpreter",
     ];
     setLoadingSuggested(true);
@@ -468,10 +467,12 @@ export default function TrailMap() {
           `)
           .addTo(map.current!);
 
-        setTimeout(() => {
-          const btn = document.getElementById(`osm-btn-${trail.id}`);
-          if (btn) btn.addEventListener("click", () => window.open(trail.osm_url, "_blank"));
-        }, 100);
+          setTimeout(() => {
+            const btn = document.getElementById(`osm-btn-${trail.id}`);
+            if (btn) {
+              btn.onclick = () => window.open(trail.osm_url, "_blank");
+            }
+          }, 100);
       });
 
       map.current!.on("mouseenter", `suggested-hit-${trail.id}`, () => { map.current!.getCanvas().style.cursor = "pointer"; });
