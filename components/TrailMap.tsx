@@ -177,9 +177,7 @@ export default function TrailMap() {
   const e = centerLng + maxDelta;
 
   // Query both named hiking relations AND named paths/tracks
-  const query = `[out:json][timeout:60];(relation["route"="hiking"]["name"](${s},${w},${n},${e});way["highway"="path"]["name"](${s},${w},${n},${e});way["highway"="track"]["name"](${s},${w},${n},${e}););out geom;`;
-  const encodedQuery = `data=${encodeURIComponent(query)}`;
-
+  const query = `[out:json][timeout:60];(relation["route"="hiking"]["name"](${s},${w},${n},${e});way["highway"="path"]["name"](${s},${w},${n},${e});way["highway"="track"]["name"](${s},${w},${n},${e}););out body geom;`;  const encodedQuery = `data=${encodeURIComponent(query)}`;
   const endpoints = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.openstreetmap.ru/cgi/interpreter",
@@ -234,33 +232,40 @@ export default function TrailMap() {
                 segments,
               };
             }
+// Handle relations
+if (el.type === "relation" && el.tags?.route === "hiking" && el.tags?.name) {
+    // ... relation code stays the same ...
+  }
 
-            // Handle ways (paths and tracks)
-            if (
-                (el.type === "way") &&
-                (el.tags?.highway === "path" || el.tags?.highway === "track") &&
-                el.tags?.name &&
-                el.tags?.bicycle !== "yes" &&
-                el.tags?.bicycle !== "designated" &&
-                el.tags?.route !== "bicycle" &&
-                el.tags?.route !== "mtb" &&
-                el.geometry &&
-                el.geometry.length >= 2
-              ) {
-              return {
-                id: el.id,
-                name: el.tags.name,
-                distance: null,
-                ascent: null,
-                difficulty: el.tags.sac_scale || null,
-                description: el.tags.description || null,
-                osm_url: `https://www.openstreetmap.org/way/${el.id}`,
-                segments: [el.geometry.map((pt) => [pt.lon, pt.lat])],
-              };
-            }
+  // Handle ways ← ADD THIS BLOCK HERE
+  const isHikingWay =
+    (el.tags?.highway === "path" || el.tags?.highway === "track") &&
+    el.tags?.name &&
+    el.tags?.bicycle !== "yes" &&
+    el.tags?.bicycle !== "designated" &&
+    el.tags?.route !== "bicycle" &&
+    el.tags?.route !== "mtb" &&
+    (el.tags?.foot === "yes" || el.tags?.foot === "designated" || el.tags?.sac_scale) &&
+    el.geometry &&
+    el.geometry.length >= 10;
 
-            return null;
-          })
+  if (el.type === "way" && isHikingWay) {
+    return {
+      id: el.id,
+      name: el.tags!.name!,
+      distance: null,
+      ascent: null,
+      difficulty: el.tags?.sac_scale || null,
+      description: el.tags?.description || null,
+      osm_url: `https://www.openstreetmap.org/way/${el.id}`,
+      segments: [el.geometry!.map((pt) => [pt.lon, pt.lat])],
+    };
+  }
+
+  return null;  // ← this was already here
+})
+
+
           .filter((t: SuggestedTrail | null): t is SuggestedTrail => t !== null && t.segments.length > 0);
 
         setSuggestedTrails(trails);
@@ -346,31 +351,77 @@ export default function TrailMap() {
           map.current!.setPaintProperty(`trail-${activity.id}`, "line-width", 5);
           hoveredId.current = activity.id;
 
-          const popup = new mapboxgl.Popup({ offset: 12, closeButton: true })
+          const popup = new mapboxgl.Popup({ offset: 12, closeButton: true, maxWidth: "280px" })
           .setLngLat(e.lngLat)
           .setHTML(`
-            <div style="font-family: sans-serif; min-width: 200px;">
-              <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">⭐ ${trail.name}</div>
+            <div style="font-family: sans-serif; min-width: 240px;">
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">${props.name}</div>
               <div style="font-size: 12px; color: #555; line-height: 1.8;">
-                ${trail.distance ? `📏 ${trail.distance} km<br/>` : ""}
-                ${trail.ascent ? `⬆️ ${trail.ascent}m ascent<br/>` : ""}
-                ${trail.difficulty ? `💪 ${trail.difficulty.replace(/_/g, " ")}<br/>` : ""}
-                ${trail.description ? `📝 ${trail.description}<br/>` : ""}
+                📅 ${props.date}<br/>
+                📏 ${props.distance} km<br/>
+                ⬆️ ${props.elevation}m gain<br/>
+                🏔️ Max: ${props.elev_high}m · Min: ${props.elev_low}m<br/>
+                ⏱️ ${props.duration}<br/>
+                🔁 Done ${props.count}x
               </div>
-              <button class="osm-popup-btn" style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #3B82F6; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;">
-                View on OSM →
+              <canvas id="elev-chart-${activity.id}" width="240" height="80" style="margin-top: 10px; width: 100%;"></canvas>
+              <button id="strava-btn-${activity.id}" style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #FC4C02; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;">
+                View on Strava →
               </button>
             </div>
           `)
           .addTo(map.current!);
         
-        popup.on("open", () => {
-          const container = popup.getElement();
-          const btn = container?.querySelector(".osm-popup-btn");
-          if (btn) {
-            btn.addEventListener("click", () => window.open(trail.osm_url, "_blank"));
+        setTimeout(async () => {
+          const btn = document.getElementById(`strava-btn-${activity.id}`);
+          if (btn) btn.addEventListener("click", () => window.open(`https://www.strava.com/activities/${activity.id}`, "_blank"));
+          try {
+            const res = await fetch(`/api/activities/${activity.id}/stream`);
+            const stream = await res.json();
+            const altData: number[] = stream.altitude?.data ?? [];
+            const distData: number[] = stream.distance?.data ?? [];
+            if (altData.length === 0) return;
+            const canvas = document.getElementById(`elev-chart-${activity.id}`) as HTMLCanvasElement;
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+            const W = canvas.width;
+            const H = canvas.height;
+            const minAlt = Math.min(...altData);
+            const maxAlt = Math.max(...altData);
+            const range = maxAlt - minAlt || 1;
+            const maxDist = distData[distData.length - 1] || 1;
+            ctx.fillStyle = "#f5f5f5";
+            ctx.fillRect(0, 0, W, H);
+            ctx.beginPath();
+            ctx.moveTo(0, H);
+            altData.forEach((alt, i) => {
+              const x = (distData[i] / maxDist) * W;
+              const y = H - ((alt - minAlt) / range) * (H - 10) - 5;
+              ctx.lineTo(x, y);
+            });
+            ctx.lineTo(W, H);
+            ctx.closePath();
+            ctx.fillStyle = "#52B788";
+            ctx.fill();
+            ctx.beginPath();
+            altData.forEach((alt, i) => {
+              const x = (distData[i] / maxDist) * W;
+              const y = H - ((alt - minAlt) / range) * (H - 10) - 5;
+              if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.strokeStyle = "#2D6A4F";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.fillStyle = "#555";
+            ctx.font = "9px sans-serif";
+            ctx.fillText(`${Math.round(minAlt)}m`, 2, H - 2);
+            ctx.fillText(`${Math.round(maxAlt)}m`, 2, 10);
+          } catch (err) {
+            console.error("Failed to load elevation stream", err);
           }
-        });
+        }, 100);
+        
 
           setSelected(activity.id);
         });
