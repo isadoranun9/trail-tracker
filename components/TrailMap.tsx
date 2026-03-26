@@ -172,11 +172,13 @@ export default function TrailMap() {
     const n = centerLat + maxDelta;
     const w = centerLng - maxDelta;
     const e = centerLng + maxDelta;
-    const query = `[out:json][timeout:30];relation["route"="hiking"]["name"](${s},${w},${n},${e});out body geom;`;
+    const query = `[out:json][timeout:60];relation["route"="hiking"]["name"](${s},${w},${n},${e});out body geom;`;
     const encodedQuery = `data=${encodeURIComponent(query)}`;
     const endpoints = [
-      "https://overpass-api.de/api/interpreter",
-    ];
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.openstreetmap.ru/cgi/interpreter",
+      ];
     setLoadingSuggested(true);
     const tryEndpoint = (index: number) => {
       if (index >= endpoints.length) {
@@ -189,9 +191,13 @@ export default function TrailMap() {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: encodedQuery,
       })
-        .then((r) => r.json())
-        .then((data) => {
-          if (!data.elements) throw new Error("No elements");
+      .then((r) => {
+        const contentType = r.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) throw new Error("Not JSON");
+        return r.json();
+      })
+      .then((data) => {
+        if (!data.elements) throw new Error("No elements");
           const trails: SuggestedTrail[] = (data.elements || [])
             .filter((el: { type: string; tags?: Record<string, string>; members?: { type: string; geometry?: { lat: number; lon: number }[] }[] }) =>
               el.type === "relation" && el.tags?.route === "hiking" && el.tags?.name
