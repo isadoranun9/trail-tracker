@@ -301,76 +301,31 @@ export default function TrailMap() {
           map.current!.setPaintProperty(`trail-${activity.id}`, "line-width", 5);
           hoveredId.current = activity.id;
 
-          const popup = new mapboxgl.Popup({ offset: 12, closeButton: true, maxWidth: "280px" })
-            .setLngLat(e.lngLat)
-            .setHTML(`
-              <div style="font-family: sans-serif; min-width: 240px;">
-                <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">${props.name}</div>
-                <div style="font-size: 12px; color: #555; line-height: 1.8;">
-                  📅 ${props.date}<br/>
-                  📏 ${props.distance} km<br/>
-                  ⬆️ ${props.elevation}m gain<br/>
-                  🏔️ Max: ${props.elev_high}m · Min: ${props.elev_low}m<br/>
-                  ⏱️ ${props.duration}<br/>
-                  🔁 Done ${props.count}x
-                </div>
-                <canvas id="elev-chart-${activity.id}" width="240" height="80" style="margin-top: 10px; width: 100%;"></canvas>
-                <button id="strava-btn-${activity.id}" style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #FC4C02; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;">
-                  View on Strava →
-                </button>
+          const popup = new mapboxgl.Popup({ offset: 12, closeButton: true })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family: sans-serif; min-width: 200px;">
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">⭐ ${trail.name}</div>
+              <div style="font-size: 12px; color: #555; line-height: 1.8;">
+                ${trail.distance ? `📏 ${trail.distance} km<br/>` : ""}
+                ${trail.ascent ? `⬆️ ${trail.ascent}m ascent<br/>` : ""}
+                ${trail.difficulty ? `💪 ${trail.difficulty.replace(/_/g, " ")}<br/>` : ""}
+                ${trail.description ? `📝 ${trail.description}<br/>` : ""}
               </div>
-            `)
-            .addTo(map.current!);
-
-          setTimeout(async () => {
-            const btn = document.getElementById(`strava-btn-${activity.id}`);
-            if (btn) btn.addEventListener("click", () => window.open(`https://www.strava.com/activities/${activity.id}`, "_blank"));
-            try {
-              const res = await fetch(`/api/activities/${activity.id}/stream`);
-              const stream = await res.json();
-              const altData: number[] = stream.altitude?.data ?? [];
-              const distData: number[] = stream.distance?.data ?? [];
-              if (altData.length === 0) return;
-              const canvas = document.getElementById(`elev-chart-${activity.id}`) as HTMLCanvasElement;
-              if (!canvas) return;
-              const ctx = canvas.getContext("2d");
-              if (!ctx) return;
-              const W = canvas.width;
-              const H = canvas.height;
-              const minAlt = Math.min(...altData);
-              const maxAlt = Math.max(...altData);
-              const range = maxAlt - minAlt || 1;
-              const maxDist = distData[distData.length - 1] || 1;
-              ctx.fillStyle = "#f5f5f5";
-              ctx.fillRect(0, 0, W, H);
-              ctx.beginPath();
-              ctx.moveTo(0, H);
-              altData.forEach((alt, i) => {
-                const x = (distData[i] / maxDist) * W;
-                const y = H - ((alt - minAlt) / range) * (H - 10) - 5;
-                ctx.lineTo(x, y);
-              });
-              ctx.lineTo(W, H);
-              ctx.closePath();
-              ctx.fillStyle = "#52B788";
-              ctx.fill();
-              ctx.beginPath();
-              altData.forEach((alt, i) => {
-                const x = (distData[i] / maxDist) * W;
-                const y = H - ((alt - minAlt) / range) * (H - 10) - 5;
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-              });
-              ctx.strokeStyle = "#2D6A4F";
-              ctx.lineWidth = 1.5;
-              ctx.stroke();
-              ctx.fillStyle = "#555";
-              ctx.font = "9px sans-serif";
-              ctx.fillText(`${Math.round(minAlt)}m`, 2, H - 2);
-              ctx.fillText(`${Math.round(maxAlt)}m`, 2, 10);
-            } catch (err) {
-              console.error("Failed to load elevation stream", err);
-            }
-          }, 100);
+              <button class="osm-popup-btn" style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #3B82F6; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;">
+                View on OSM →
+              </button>
+            </div>
+          `)
+          .addTo(map.current!);
+        
+        popup.on("open", () => {
+          const container = popup.getElement();
+          const btn = container?.querySelector(".osm-popup-btn");
+          if (btn) {
+            btn.addEventListener("click", () => window.open(trail.osm_url, "_blank"));
+          }
+        });
 
           setSelected(activity.id);
         });
@@ -456,30 +411,33 @@ export default function TrailMap() {
         map.current!.setPaintProperty(`suggested-${trail.id}`, "line-dasharray", [1, 0]);
         hoveredSuggestedId.current = trail.id;
 
-        new mapboxgl.Popup({ offset: 12, closeButton: true })
-          .setLngLat(e.lngLat)
-          .setHTML(`
-            <div style="font-family: sans-serif; min-width: 200px;">
-              <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">⭐ ${trail.name}</div>
-              <div style="font-size: 12px; color: #555; line-height: 1.8;">
-                ${trail.distance ? `📏 ${trail.distance} km<br/>` : ""}
-                ${trail.ascent ? `⬆️ ${trail.ascent}m ascent<br/>` : ""}
-                ${trail.difficulty ? `💪 ${trail.difficulty.replace(/_/g, " ")}<br/>` : ""}
-                ${trail.description ? `📝 ${trail.description}<br/>` : ""}
-              </div>
-              <button id="osm-btn-${trail.id}" style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #3B82F6; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;">
-                View on OSM →
-              </button>
-            </div>
-          `)
-          .addTo(map.current!);
+        const osmUrl = trail.osm_url;
 
-          setTimeout(() => {
-            const btn = document.getElementById(`osm-btn-${trail.id}`);
-            if (btn) {
-              btn.onclick = () => window.open(trail.osm_url, "_blank");
-            }
-          }, 100);
+const popup = new mapboxgl.Popup({ offset: 12, closeButton: true })
+  .setLngLat(e.lngLat)
+  .setHTML(`
+    <div style="font-family: sans-serif; min-width: 200px;">
+      <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">⭐ ${trail.name}</div>
+      <div style="font-size: 12px; color: #555; line-height: 1.8;">
+        ${trail.distance ? `📏 ${trail.distance} km<br/>` : ""}
+        ${trail.ascent ? `⬆️ ${trail.ascent}m ascent<br/>` : ""}
+        ${trail.difficulty ? `💪 ${trail.difficulty.replace(/_/g, " ")}<br/>` : ""}
+        ${trail.description ? `📝 ${trail.description}<br/>` : ""}
+      </div>
+      <button class="osm-popup-btn" style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #3B82F6; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;">
+        View on OSM →
+      </button>
+    </div>
+  `)
+  .addTo(map.current!);
+
+popup.on("open", () => {
+  const container = popup.getElement();
+  const btn = container?.querySelector(".osm-popup-btn");
+  if (btn) {
+    btn.addEventListener("click", () => window.open(osmUrl, "_blank"));
+  }
+});
       });
 
       map.current!.on("mouseenter", `suggested-hit-${trail.id}`, () => { map.current!.getCanvas().style.cursor = "pointer"; });
