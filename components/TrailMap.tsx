@@ -181,11 +181,12 @@ export default function TrailMap() {
       ];
     setLoadingSuggested(true);
     const tryEndpoint = (index: number) => {
-      if (index >= endpoints.length) {
-        console.error("All endpoints failed");
-        setLoadingSuggested(false);
-        return;
-      }
+        if (index >= endpoints.length) {
+          console.error("All endpoints failed");
+          setLoadingSuggested(false);
+          setSuggestedTrails([]);
+          return;
+        }
       fetch(endpoints[index], {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -727,8 +728,10 @@ export default function TrailMap() {
 
               {loadingSuggested && <p style={{ opacity: 0.5 }}>Fetching trails...</p>}
               {!loadingSuggested && filteredSuggested.length === 0 && (
-                <p style={{ opacity: 0.5, fontSize: "12px" }}>No trails found. Try zooming out or moving the map then hit refresh.</p>
-              )}
+  <p style={{ opacity: 0.5, fontSize: "12px" }}>
+    No trails found. The OpenStreetMap server may be busy — try again in a few minutes, or zoom into a more specific area.
+  </p>
+)}
               {filteredSuggested.map((t) => (
                 <div
                   key={t.id}
