@@ -18,15 +18,15 @@ interface Activity {
 }
 
 interface SuggestedTrail {
-    id: number;
-    name: string;
-    distance: string | null;
-    ascent: string | null;
-    difficulty: string | null;
-    description: string | null;
-    osm_url: string;
-    segments: number[][][];
-  }
+  id: number;
+  name: string;
+  distance: string | null;
+  ascent: string | null;
+  difficulty: string | null;
+  description: string | null;
+  osm_url: string;
+  segments: number[][][];
+}
 
 interface Filters {
   search: string;
@@ -73,8 +73,8 @@ function routesAreSimilar(coords1: number[][], coords2: number[][]): boolean {
 }
 
 function applyFilters(activities: Activity[], filters: Filters): Activity[] {
-    if (!Array.isArray(activities)) return [];
-    return activities.filter((a) => {
+  if (!Array.isArray(activities)) return [];
+  return activities.filter((a) => {
     const distKm = a.distance / 1000;
     const timeHours = a.moving_time / 3600;
     if (filters.search && !a.name.toLowerCase().includes(filters.search.toLowerCase())) return false;
@@ -88,8 +88,8 @@ function applyFilters(activities: Activity[], filters: Filters): Activity[] {
 }
 
 function applySuggestedFilters(trails: SuggestedTrail[], filters: SuggestedFilters): SuggestedTrail[] {
-    if (!Array.isArray(trails)) return [];
-    return trails.filter((t) => {
+  if (!Array.isArray(trails)) return [];
+  return trails.filter((t) => {
     const dist = parseFloat(t.distance || "0");
     const ascent = parseFloat(t.ascent || "0");
     if (filters.minDistance && dist < parseFloat(filters.minDistance)) return false;
@@ -101,19 +101,11 @@ function applySuggestedFilters(trails: SuggestedTrail[], filters: SuggestedFilte
 }
 
 const defaultFilters: Filters = {
-  search: "",
-  minDistance: "",
-  maxDistance: "",
-  minElevation: "",
-  minTime: "",
-  maxTime: "",
+  search: "", minDistance: "", maxDistance: "", minElevation: "", minTime: "", maxTime: "",
 };
 
 const defaultSuggestedFilters: SuggestedFilters = {
-  minDistance: "",
-  maxDistance: "",
-  minAscent: "",
-  difficulty: "",
+  minDistance: "", maxDistance: "", minAscent: "", difficulty: "",
 };
 
 export default function TrailMap() {
@@ -146,13 +138,11 @@ export default function TrailMap() {
     const cached = localStorage.getItem("trail-activities");
     const cachedTime = localStorage.getItem("trail-activities-time");
     const oneHour = 60 * 60 * 1000;
-  
     if (cached && cachedTime && Date.now() - parseInt(cachedTime) < oneHour) {
       setActivities(JSON.parse(cached));
       setLoading(false);
       return;
     }
-  
     fetch("/api/activities")
       .then((r) => r.json())
       .then((data) => {
@@ -168,16 +158,13 @@ export default function TrailMap() {
       setTimeout(() => fetchSuggestedTrails(), 1000);
       return;
     }
-  
     const zoom = map.current.getZoom();
     if (zoom < 9) {
       alert("Please zoom in more to see suggested trails!");
       return;
     }
-  
     const bounds = map.current.getBounds();
     if (!bounds) return;
-  
     const centerLat = (bounds.getNorth() + bounds.getSouth()) / 2;
     const centerLng = (bounds.getEast() + bounds.getWest()) / 2;
     const maxDelta = 0.08;
@@ -185,55 +172,61 @@ export default function TrailMap() {
     const n = centerLat + maxDelta;
     const w = centerLng - maxDelta;
     const e = centerLng + maxDelta;
-  
-    const query = `[out:json][timeout:30];relation["route"="hiking"]["name"](${s},${w},${n},${e});out geom tags;`;
-  
+    const query = `[out:json][timeout:30];relation["route"="hiking"]["name"](${s},${w},${n},${e});out body geom;`;
+    const encodedQuery = `data=${encodeURIComponent(query)}`;
+    const endpoints = [
+      "https://overpass.kumi.systems/api/interpreter",
+      "https://overpass-api.de/api/interpreter",
+    ];
     setLoadingSuggested(true);
-  
-    fetch("https://overpass.kumi.systems/api/interpreter", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: `data=${encodeURIComponent(query)}`,
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        const trails: SuggestedTrail[] = (data.elements || [])
-          .filter((el: { type: string; tags?: Record<string, string>; members?: { type: string; geometry?: { lat: number; lon: number }[] }[] }) =>
-            el.type === "relation" &&
-            el.tags?.route === "hiking" &&
-            el.tags?.name
-          )
-          .map((rel: { id: number; tags: Record<string, string>; members: { type: string; geometry?: { lat: number; lon: number }[] }[] }) => {
-            const segments: number[][][] = (rel.members || [])
-              .filter((m) => m.type === "way" && m.geometry && m.geometry.length >= 2)
-              .map((m) => (m.geometry || []).map((pt) => [pt.lon, pt.lat]));
-            return {
-              id: rel.id,
-              name: rel.tags.name,
-              distance: rel.tags.distance || null,
-              ascent: rel.tags.ascent || null,
-              difficulty: rel.tags.sac_scale || null,
-              description: rel.tags.description || null,
-              osm_url: `https://www.openstreetmap.org/relation/${rel.id}`,
-              segments,
-            };
-          })
-          .filter((t: { segments: number[][][] }) => t.segments.length > 0);
-  
-        setSuggestedTrails(trails);
+    const tryEndpoint = (index: number) => {
+      if (index >= endpoints.length) {
+        console.error("All endpoints failed");
         setLoadingSuggested(false);
+        return;
+      }
+      fetch(endpoints[index], {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: encodedQuery,
       })
-      .catch((err) => {
-        console.error("Overpass error:", err);
-        setLoadingSuggested(false);
-      });
+        .then((r) => r.json())
+        .then((data) => {
+          if (!data.elements) throw new Error("No elements");
+          const trails: SuggestedTrail[] = (data.elements || [])
+            .filter((el: { type: string; tags?: Record<string, string>; members?: { type: string; geometry?: { lat: number; lon: number }[] }[] }) =>
+              el.type === "relation" && el.tags?.route === "hiking" && el.tags?.name
+            )
+            .map((rel: { id: number; tags: Record<string, string>; members: { type: string; geometry?: { lat: number; lon: number }[] }[] }) => {
+              const segments: number[][][] = (rel.members || [])
+                .filter((m) => m.type === "way" && m.geometry && m.geometry.length >= 2)
+                .map((m) => (m.geometry || []).map((pt) => [pt.lon, pt.lat]));
+              return {
+                id: rel.id,
+                name: rel.tags.name,
+                distance: rel.tags.distance || null,
+                ascent: rel.tags.ascent || null,
+                difficulty: rel.tags.sac_scale || null,
+                description: rel.tags.description || null,
+                osm_url: `https://www.openstreetmap.org/relation/${rel.id}`,
+                segments,
+              };
+            })
+            .filter((t: { segments: number[][][] }) => t.segments.length > 0);
+          setSuggestedTrails(trails);
+          setLoadingSuggested(false);
+        })
+        .catch((err) => {
+          console.log(`Endpoint ${endpoints[index]} failed, trying next...`, err);
+          tryEndpoint(index + 1);
+        });
+    };
+    tryEndpoint(0);
   }, [mapReady]);
 
   useEffect(() => {
     if (!mapContainer.current || activities.length === 0) return;
-
     mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
-
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: "mapbox://styles/mapbox/light-v11",
@@ -244,13 +237,10 @@ export default function TrailMap() {
     map.current.on("load", () => {
       const decoded: Record<number, number[][]> = {};
       activities.forEach((a) => {
-        if (a.map?.summary_polyline) {
-          decoded[a.id] = polyline.decode(a.map.summary_polyline);
-        }
+        if (a.map?.summary_polyline) decoded[a.id] = polyline.decode(a.map.summary_polyline);
       });
 
       const activityList = activities.filter((a) => decoded[a.id]?.length > 0);
-
       activityList.forEach((a) => {
         let count = 1;
         activityList.forEach((b) => {
@@ -279,26 +269,17 @@ export default function TrailMap() {
             count,
             color,
           },
-          geometry: {
-            type: "LineString",
-            coordinates: coords.map(([lat, lng]) => [lng, lat]),
-          },
+          geometry: { type: "LineString", coordinates: coords.map(([lat, lng]) => [lng, lat]) },
         };
 
         map.current!.addSource(`trail-${activity.id}`, { type: "geojson", data: geojson });
-
         map.current!.addLayer({
-          id: `trail-hit-${activity.id}`,
-          type: "line",
-          source: `trail-${activity.id}`,
+          id: `trail-hit-${activity.id}`, type: "line", source: `trail-${activity.id}`,
           layout: { "line-join": "round", "line-cap": "round" },
           paint: { "line-color": "transparent", "line-width": 20 },
         });
-
         map.current!.addLayer({
-          id: `trail-${activity.id}`,
-          type: "line",
-          source: `trail-${activity.id}`,
+          id: `trail-${activity.id}`, type: "line", source: `trail-${activity.id}`,
           layout: { "line-join": "round", "line-cap": "round" },
           paint: { "line-color": color, "line-width": 3, "line-opacity": 0.85 },
         });
@@ -306,12 +287,10 @@ export default function TrailMap() {
         map.current!.on("click", `trail-hit-${activity.id}`, async (e) => {
           const props = e.features?.[0]?.properties;
           if (!props) return;
-
           if (hoveredId.current !== null) {
             map.current!.setPaintProperty(`trail-${hoveredId.current}`, "line-color", getHeatColor(repeatCounts.current[hoveredId.current]));
             map.current!.setPaintProperty(`trail-${hoveredId.current}`, "line-width", 3);
           }
-
           map.current!.setPaintProperty(`trail-${activity.id}`, "line-color", "#FFD700");
           map.current!.setPaintProperty(`trail-${activity.id}`, "line-width", 5);
           hoveredId.current = activity.id;
@@ -340,7 +319,6 @@ export default function TrailMap() {
           setTimeout(async () => {
             const btn = document.getElementById(`strava-btn-${activity.id}`);
             if (btn) btn.addEventListener("click", () => window.open(`https://www.strava.com/activities/${activity.id}`, "_blank"));
-
             try {
               const res = await fetch(`/api/activities/${activity.id}/stream`);
               const stream = await res.json();
@@ -374,8 +352,7 @@ export default function TrailMap() {
               altData.forEach((alt, i) => {
                 const x = (distData[i] / maxDist) * W;
                 const y = H - ((alt - minAlt) / range) * (H - 10) - 5;
-                if (i === 0) ctx.moveTo(x, y);
-                else ctx.lineTo(x, y);
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
               });
               ctx.strokeStyle = "#2D6A4F";
               ctx.lineWidth = 1.5;
@@ -396,23 +373,40 @@ export default function TrailMap() {
         map.current!.on("mouseleave", `trail-hit-${activity.id}`, () => { map.current!.getCanvas().style.cursor = ""; });
       });
 
+      if (map.current) {
+        map.current.on("click", (e) => {
+          if (!map.current) return;
+          const features = map.current.queryRenderedFeatures(e.point);
+          const clickedOnTrail = features.some(
+            (f) => f.layer?.id?.startsWith("trail-hit-") || f.layer?.id?.startsWith("suggested-hit-")
+          );
+          if (!clickedOnTrail) {
+            if (hoveredId.current !== null) {
+              map.current.setPaintProperty(`trail-${hoveredId.current}`, "line-color", getHeatColor(repeatCounts.current[hoveredId.current]));
+              map.current.setPaintProperty(`trail-${hoveredId.current}`, "line-width", 3);
+              hoveredId.current = null;
+              setSelected(null);
+            }
+            if (hoveredSuggestedId.current !== null) {
+              if (map.current.getLayer(`suggested-${hoveredSuggestedId.current}`)) {
+                map.current.setPaintProperty(`suggested-${hoveredSuggestedId.current}`, "line-color", "#3B82F6");
+                map.current.setPaintProperty(`suggested-${hoveredSuggestedId.current}`, "line-width", 2);
+                map.current.setPaintProperty(`suggested-${hoveredSuggestedId.current}`, "line-dasharray", [2, 2]);
+              }
+              hoveredSuggestedId.current = null;
+            }
+          }
+        });
+      }
+
       setMapReady(true);
     });
 
     return () => map.current?.remove();
   }, [activities]);
 
-  // Draw suggested trails on map
   useEffect(() => {
     if (!mapReady || !map.current) return;
-
-    console.log("suggested useEffect fired", {
-        mapReady,
-        filteredSuggestedCount: filteredSuggested.length,
-        suggestedTrailsCount: suggestedTrails.length,
-      });
-
-    // Remove old suggested layers
     suggestedLayerIds.current.forEach((id) => {
       if (map.current!.getLayer(`suggested-hit-${id}`)) map.current!.removeLayer(`suggested-hit-${id}`);
       if (map.current!.getLayer(`suggested-${id}`)) map.current!.removeLayer(`suggested-${id}`);
@@ -420,47 +414,30 @@ export default function TrailMap() {
     });
     suggestedLayerIds.current.clear();
 
+    if (!showSuggested) return;
+
     let layerIndex = 0;
     filteredSuggested.forEach((trail) => {
-        if (!trail.segments || trail.segments.length < 1) return;
-
-        const geojson: GeoJSON.Feature = {
-            type: "Feature",
-            properties: { id: trail.id, name: trail.name },
-            geometry: {
-              type: "MultiLineString",
-              coordinates: trail.segments || [],
-            },
-          };
-
+      if (!trail.segments || trail.segments.length < 1) return;
+      const geojson: GeoJSON.Feature = {
+        type: "Feature",
+        properties: { id: trail.id, name: trail.name },
+        geometry: { type: "MultiLineString", coordinates: trail.segments || [] },
+      };
       map.current!.addSource(`suggested-${trail.id}`, { type: "geojson", data: geojson });
-
       map.current!.addLayer({
-        id: `suggested-hit-${trail.id}`,
-        type: "line",
-        source: `suggested-${trail.id}`,
+        id: `suggested-hit-${trail.id}`, type: "line", source: `suggested-${trail.id}`,
         layout: { "line-join": "round", "line-cap": "round" },
         paint: { "line-color": "transparent", "line-width": 20 },
       });
-
       map.current!.addLayer({
-        id: `suggested-${trail.id}`,
-        type: "line",
-        source: `suggested-${trail.id}`,
+        id: `suggested-${trail.id}`, type: "line", source: `suggested-${trail.id}`,
         layout: { "line-join": "round", "line-cap": "round" },
-        paint: {
-          "line-color": "#3B82F6",
-          "line-width": 2,
-          "line-opacity": 0.7,
-          "line-dasharray": [2, 2],
-          "line-offset": (layerIndex % 3) * 2,
-        },
+        paint: { "line-color": "#3B82F6", "line-width": 2, "line-opacity": 0.7, "line-dasharray": [2, 2], "line-offset": (layerIndex % 3) * 2 },
       });
-
       layerIndex++;
 
       map.current!.on("click", `suggested-hit-${trail.id}`, (e) => {
-        // Reset previously highlighted suggested trail
         if (hoveredSuggestedId.current !== null) {
           if (map.current!.getLayer(`suggested-${hoveredSuggestedId.current}`)) {
             map.current!.setPaintProperty(`suggested-${hoveredSuggestedId.current}`, "line-color", "#3B82F6");
@@ -468,8 +445,6 @@ export default function TrailMap() {
             map.current!.setPaintProperty(`suggested-${hoveredSuggestedId.current}`, "line-dasharray", [2, 2]);
           }
         }
-
-        // Highlight clicked trail
         map.current!.setPaintProperty(`suggested-${trail.id}`, "line-color", "#FFD700");
         map.current!.setPaintProperty(`suggested-${trail.id}`, "line-width", 4);
         map.current!.setPaintProperty(`suggested-${trail.id}`, "line-dasharray", [1, 0]);
@@ -486,10 +461,7 @@ export default function TrailMap() {
                 ${trail.difficulty ? `💪 ${trail.difficulty.replace(/_/g, " ")}<br/>` : ""}
                 ${trail.description ? `📝 ${trail.description}<br/>` : ""}
               </div>
-              <button
-                id="osm-btn-${trail.id}"
-                style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #3B82F6; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;"
-              >
+              <button id="osm-btn-${trail.id}" style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #3B82F6; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;">
                 View on OSM →
               </button>
             </div>
@@ -504,12 +476,10 @@ export default function TrailMap() {
 
       map.current!.on("mouseenter", `suggested-hit-${trail.id}`, () => { map.current!.getCanvas().style.cursor = "pointer"; });
       map.current!.on("mouseleave", `suggested-hit-${trail.id}`, () => { map.current!.getCanvas().style.cursor = ""; });
-
       suggestedLayerIds.current.add(trail.id);
     });
   }, [filteredSuggested, showSuggested, mapReady]);
 
-  // Filter visibility for my trails
   useEffect(() => {
     if (!mapReady || !map.current) return;
     const filteredIds = new Set(filteredActivities.map((a) => a.id));
@@ -537,35 +507,22 @@ export default function TrailMap() {
     if (coords.length === 0) return;
     const lats = coords.map(([lat]) => lat);
     const lngs = coords.map(([, lng]) => lng);
-    const bounds = new mapboxgl.LngLatBounds(
-      [Math.min(...lngs), Math.min(...lats)],
-      [Math.max(...lngs), Math.max(...lats)]
-    );
+    const bounds = new mapboxgl.LngLatBounds([Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]);
     map.current.fitBounds(bounds, { padding: 80, duration: 1200 });
   };
 
   const inputStyle = {
-    width: "100%",
-    padding: "6px 8px",
-    borderRadius: "6px",
-    border: "1px solid #444",
-    background: "#1a1a1a",
-    color: "white",
-    fontSize: "12px",
-    boxSizing: "border-box" as const,
+    width: "100%", padding: "6px 8px", borderRadius: "6px", border: "1px solid #444",
+    background: "#1a1a1a", color: "white", fontSize: "12px", boxSizing: "border-box" as const,
   };
 
   const labelStyle = {
-    fontSize: "11px",
-    opacity: 0.6,
-    marginBottom: "4px",
-    display: "block" as const,
+    fontSize: "11px", opacity: 0.6, marginBottom: "4px", display: "block" as const,
   };
 
   return (
     <div style={{ display: "flex", height: "100vh", position: "relative" }}>
 
-      {/* Sidebar toggle */}
       <button
         onClick={() => { setSidebarOpen(!sidebarOpen); setTimeout(() => map.current?.resize(), 350); }}
         style={{
@@ -578,21 +535,18 @@ export default function TrailMap() {
         {sidebarOpen ? "◀" : "▶"}
       </button>
 
-      {/* Filter toggle */}
       <button
         onClick={() => setFilterOpen(!filterOpen)}
         style={{
           position: "absolute", top: "10px", right: "10px", zIndex: 10,
           background: (activeFilterCount + activeSuggestedFilterCount) > 0 ? "#F4A261" : "#2D6A4F",
           color: "white", border: "none", borderRadius: "8px", padding: "8px 12px",
-          cursor: "pointer", fontSize: "13px", fontWeight: 600,
-          boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+          cursor: "pointer", fontSize: "13px", fontWeight: 600, boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
         }}
       >
         {(activeFilterCount + activeSuggestedFilterCount) > 0 ? `⚙️ Filters (${activeFilterCount + activeSuggestedFilterCount})` : "⚙️ Filters"}
       </button>
 
-      {/* Filter panel */}
       {filterOpen && (
         <div style={{
           position: "absolute", top: "50px", right: "10px", zIndex: 10,
@@ -602,15 +556,11 @@ export default function TrailMap() {
         }}>
           <div style={{ display: "flex", gap: "8px", marginBottom: "1rem" }}>
             {(["my", "suggested"] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setFilterTab(tab)}
-                style={{
-                  flex: 1, padding: "6px", borderRadius: "6px", border: "none",
-                  background: filterTab === tab ? "#2D6A4F" : "#1a1a1a",
-                  color: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600,
-                }}
-              >
+              <button key={tab} onClick={() => setFilterTab(tab)} style={{
+                flex: 1, padding: "6px", borderRadius: "6px", border: "none",
+                background: filterTab === tab ? "#2D6A4F" : "#1a1a1a",
+                color: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600,
+              }}>
                 {tab === "my" ? "My Trails" : "Suggested"}
               </button>
             ))}
@@ -669,11 +619,7 @@ export default function TrailMap() {
               </div>
               <div style={{ marginBottom: "0.75rem" }}>
                 <label style={labelStyle}>Difficulty</label>
-                <select
-                  style={inputStyle}
-                  value={suggestedFilters.difficulty}
-                  onChange={(e) => setSuggestedFilters({ ...suggestedFilters, difficulty: e.target.value })}
-                >
+                <select style={inputStyle} value={suggestedFilters.difficulty} onChange={(e) => setSuggestedFilters({ ...suggestedFilters, difficulty: e.target.value })}>
                   <option value="">Any</option>
                   <option value="hiking">Hiking (easy)</option>
                   <option value="mountain_hiking">Mountain hiking</option>
@@ -689,31 +635,22 @@ export default function TrailMap() {
         </div>
       )}
 
-      {/* Sidebar */}
       {sidebarOpen && (
         <div style={{ width: "280px", overflowY: "auto", padding: "1rem", background: "#1a1a1a", color: "white", flexShrink: 0 }}>
           <div style={{ display: "flex", gap: "8px", marginBottom: "1rem" }}>
             <button
               onClick={() => setActiveTab("my")}
-              style={{
-                flex: 1, padding: "8px", borderRadius: "8px", border: "none",
-                background: activeTab === "my" ? "#2D6A4F" : "#2a2a2a",
-                color: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600,
-              }}
+              style={{ flex: 1, padding: "8px", borderRadius: "8px", border: "none", background: activeTab === "my" ? "#2D6A4F" : "#2a2a2a", color: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600 }}
             >
               🥾 My Trails
             </button>
             <button
-            onClick={() => {
+              onClick={() => {
                 setActiveTab("suggested");
                 setShowSuggested(true);
                 setTimeout(fetchSuggestedTrails, 100);
-            }}
-              style={{
-                flex: 1, padding: "8px", borderRadius: "8px", border: "none",
-                background: activeTab === "suggested" ? "#3B82F6" : "#2a2a2a",
-                color: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600,
               }}
+              style={{ flex: 1, padding: "8px", borderRadius: "8px", border: "none", background: activeTab === "suggested" ? "#3B82F6" : "#2a2a2a", color: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600 }}
             >
               🗺️ Discover
             </button>
@@ -758,22 +695,21 @@ export default function TrailMap() {
 
           {activeTab === "suggested" && (
             <>
-
-<button
-  onClick={fetchSuggestedTrails}
-  disabled={loadingSuggested}
-  style={{
-    width: "100%", padding: "8px", borderRadius: "8px", border: "none",
-    background: loadingSuggested ? "#555" : "#3B82F6",
-    color: "white", cursor: loadingSuggested ? "not-allowed" : "pointer",
-    fontSize: "12px", fontWeight: 600, marginBottom: "0.5rem",
-  }}
->
-  {loadingSuggested ? "⏳ Loading trails (may take ~30s)..." : "🔄 Refresh for current area"}
-</button>
-<p style={{ fontSize: "11px", opacity: 0.5, marginBottom: "0.75rem" }}>
-  Zoom in to a specific area first for best results
-</p>
+              <button
+                onClick={fetchSuggestedTrails}
+                disabled={loadingSuggested}
+                style={{
+                  width: "100%", padding: "8px", borderRadius: "8px", border: "none",
+                  background: loadingSuggested ? "#555" : "#3B82F6",
+                  color: "white", cursor: loadingSuggested ? "not-allowed" : "pointer",
+                  fontSize: "12px", fontWeight: 600, marginBottom: "0.5rem",
+                }}
+              >
+                {loadingSuggested ? "⏳ Loading trails (may take ~30s)..." : "🔄 Refresh for current area"}
+              </button>
+              <p style={{ fontSize: "11px", opacity: 0.5, marginBottom: "0.75rem" }}>
+                Zoom in to a specific area first for best results
+              </p>
 
               <div style={{ marginBottom: "0.75rem", padding: "0.75rem", background: "#2a2a2a", borderRadius: "8px", fontSize: "11px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -789,10 +725,35 @@ export default function TrailMap() {
               {filteredSuggested.map((t) => (
                 <div
                   key={t.id}
+                  onClick={() => {
+                    if (!map.current || !mapReady) return;
+                    const allCoords = t.segments.flat();
+                    if (allCoords.length === 0) return;
+                    const lats = allCoords.map(([, lat]) => lat);
+                    const lngs = allCoords.map(([lng]) => lng);
+                    const bounds = new mapboxgl.LngLatBounds(
+                      [Math.min(...lngs), Math.min(...lats)],
+                      [Math.max(...lngs), Math.max(...lats)]
+                    );
+                    map.current.fitBounds(bounds, { padding: 80, duration: 1200 });
+                    if (hoveredSuggestedId.current !== null) {
+                      if (map.current.getLayer(`suggested-${hoveredSuggestedId.current}`)) {
+                        map.current.setPaintProperty(`suggested-${hoveredSuggestedId.current}`, "line-color", "#3B82F6");
+                        map.current.setPaintProperty(`suggested-${hoveredSuggestedId.current}`, "line-width", 2);
+                        map.current.setPaintProperty(`suggested-${hoveredSuggestedId.current}`, "line-dasharray", [2, 2]);
+                      }
+                    }
+                    if (map.current.getLayer(`suggested-${t.id}`)) {
+                      map.current.setPaintProperty(`suggested-${t.id}`, "line-color", "#FFD700");
+                      map.current.setPaintProperty(`suggested-${t.id}`, "line-width", 4);
+                      map.current.setPaintProperty(`suggested-${t.id}`, "line-dasharray", [1, 0]);
+                      hoveredSuggestedId.current = t.id;
+                    }
+                  }}
                   style={{
                     padding: "0.75rem", marginBottom: "0.5rem",
                     background: "#2a2a2a", borderRadius: "8px",
-                    borderLeft: "3px solid #3B82F6",
+                    borderLeft: "3px solid #3B82F6", cursor: "pointer",
                   }}
                 >
                   <div style={{ fontWeight: 500, fontSize: "13px" }}>{t.name}</div>
@@ -813,7 +774,6 @@ export default function TrailMap() {
         </div>
       )}
 
-      {/* Map */}
       <div ref={mapContainer} style={{ flex: 1 }} />
     </div>
   );
