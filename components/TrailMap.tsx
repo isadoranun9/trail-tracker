@@ -154,44 +154,53 @@ export default function TrailMap() {
   }, []);
 
   const fetchSuggestedTrails = useCallback(() => {
-    if (!map.current || !mapReady) {
-      setTimeout(() => fetchSuggestedTrails(), 1000);
+  if (!map.current || !mapReady) {
+    setTimeout(() => fetchSuggestedTrails(), 1000);
+    return;
+  }
+
+  const zoom = map.current.getZoom();
+  if (zoom < 9) {
+    alert("Please zoom in more to see suggested trails!");
+    return;
+  }
+
+  const bounds = map.current.getBounds();
+  if (!bounds) return;
+
+  const centerLat = (bounds.getNorth() + bounds.getSouth()) / 2;
+  const centerLng = (bounds.getEast() + bounds.getWest()) / 2;
+  const maxDelta = 0.15;
+  const s = centerLat - maxDelta;
+  const n = centerLat + maxDelta;
+  const w = centerLng - maxDelta;
+  const e = centerLng + maxDelta;
+
+  // Query both named hiking relations AND named paths/tracks
+  const query = `[out:json][timeout:60];(relation["route"="hiking"]["name"](${s},${w},${n},${e});way["highway"="path"]["name"](${s},${w},${n},${e});way["highway"="track"]["name"](${s},${w},${n},${e}););out geom;`;
+  const encodedQuery = `data=${encodeURIComponent(query)}`;
+
+  const endpoints = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.openstreetmap.ru/cgi/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+  ];
+
+  setLoadingSuggested(true);
+
+  const tryEndpoint = (index: number) => {
+    if (index >= endpoints.length) {
+      console.error("All endpoints failed");
+      setLoadingSuggested(false);
+      setSuggestedTrails([]);
       return;
     }
-    const zoom = map.current.getZoom();
-    if (zoom < 9) {
-      alert("Please zoom in more to see suggested trails!");
-      return;
-    }
-    const bounds = map.current.getBounds();
-    if (!bounds) return;
-    const centerLat = (bounds.getNorth() + bounds.getSouth()) / 2;
-    const centerLng = (bounds.getEast() + bounds.getWest()) / 2;
-    const maxDelta = 0.08;
-    const s = centerLat - maxDelta;
-    const n = centerLat + maxDelta;
-    const w = centerLng - maxDelta;
-    const e = centerLng + maxDelta;
-    const query = `[out:json][timeout:60];relation["route"="hiking"]["name"](${s},${w},${n},${e});out body geom;`;
-    const encodedQuery = `data=${encodeURIComponent(query)}`;
-    const endpoints = [
-        "https://overpass-api.de/api/interpreter",
-        "https://overpass-api.de/api/interpreter",
-        "https://overpass.openstreetmap.ru/cgi/interpreter",
-      ];
-    setLoadingSuggested(true);
-    const tryEndpoint = (index: number) => {
-        if (index >= endpoints.length) {
-          console.error("All endpoints failed");
-          setLoadingSuggested(false);
-          setSuggestedTrails([]);
-          return;
-        }
-      fetch(endpoints[index], {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: encodedQuery,
-      })
+
+    fetch(endpoints[index], {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: encodedQuery,
+    })
       .then((r) => {
         const contentType = r.headers.get("content-type") || "";
         if (!contentType.includes("application/json")) throw new Error("Not JSON");
@@ -199,36 +208,72 @@ export default function TrailMap() {
       })
       .then((data) => {
         if (!data.elements) throw new Error("No elements");
-          const trails: SuggestedTrail[] = (data.elements || [])
-            .filter((el: { type: string; tags?: Record<string, string>; members?: { type: string; geometry?: { lat: number; lon: number }[] }[] }) =>
-              el.type === "relation" && el.tags?.route === "hiking" && el.tags?.name
-            )
-            .map((rel: { id: number; tags: Record<string, string>; members: { type: string; geometry?: { lat: number; lon: number }[] }[] }) => {
-              const segments: number[][][] = (rel.members || [])
+
+        const trails: SuggestedTrail[] = (data.elements || [])
+          .map((el: {
+            type: string;
+            id: number;
+            tags?: Record<string, string>;
+            members?: { type: string; geometry?: { lat: number; lon: number }[] }[];
+            geometry?: { lat: number; lon: number }[];
+          }) => {
+            // Handle relations
+            if (el.type === "relation" && el.tags?.route === "hiking" && el.tags?.name) {
+              const segments: number[][][] = (el.members || [])
                 .filter((m) => m.type === "way" && m.geometry && m.geometry.length >= 2)
                 .map((m) => (m.geometry || []).map((pt) => [pt.lon, pt.lat]));
+              if (segments.length === 0) return null;
               return {
-                id: rel.id,
-                name: rel.tags.name,
-                distance: rel.tags.distance || null,
-                ascent: rel.tags.ascent || null,
-                difficulty: rel.tags.sac_scale || null,
-                description: rel.tags.description || null,
-                osm_url: `https://www.openstreetmap.org/relation/${rel.id}`,
+                id: el.id,
+                name: el.tags.name,
+                distance: el.tags.distance || null,
+                ascent: el.tags.ascent || null,
+                difficulty: el.tags.sac_scale || null,
+                description: el.tags.description || null,
+                osm_url: `https://www.openstreetmap.org/relation/${el.id}`,
                 segments,
               };
-            })
-            .filter((t: { segments: number[][][] }) => t.segments.length > 0);
-          setSuggestedTrails(trails);
-          setLoadingSuggested(false);
-        })
-        .catch((err) => {
-          console.log(`Endpoint ${endpoints[index]} failed, trying next...`, err);
-          tryEndpoint(index + 1);
-        });
-    };
-    tryEndpoint(0);
-  }, [mapReady]);
+            }
+
+            // Handle ways (paths and tracks)
+            if (
+                (el.type === "way") &&
+                (el.tags?.highway === "path" || el.tags?.highway === "track") &&
+                el.tags?.name &&
+                el.tags?.bicycle !== "yes" &&
+                el.tags?.bicycle !== "designated" &&
+                el.tags?.route !== "bicycle" &&
+                el.tags?.route !== "mtb" &&
+                el.geometry &&
+                el.geometry.length >= 2
+              ) {
+              return {
+                id: el.id,
+                name: el.tags.name,
+                distance: null,
+                ascent: null,
+                difficulty: el.tags.sac_scale || null,
+                description: el.tags.description || null,
+                osm_url: `https://www.openstreetmap.org/way/${el.id}`,
+                segments: [el.geometry.map((pt) => [pt.lon, pt.lat])],
+              };
+            }
+
+            return null;
+          })
+          .filter((t: SuggestedTrail | null): t is SuggestedTrail => t !== null && t.segments.length > 0);
+
+        setSuggestedTrails(trails);
+        setLoadingSuggested(false);
+      })
+      .catch((err) => {
+        console.log(`Endpoint ${endpoints[index]} failed, trying next...`, err);
+        tryEndpoint(index + 1);
+      });
+  };
+
+  tryEndpoint(0);
+}, [mapReady]);
 
   useEffect(() => {
     if (!mapContainer.current || activities.length === 0) return;
@@ -411,33 +456,30 @@ export default function TrailMap() {
         map.current!.setPaintProperty(`suggested-${trail.id}`, "line-dasharray", [1, 0]);
         hoveredSuggestedId.current = trail.id;
 
-        const osmUrl = trail.osm_url;
+        const popupId = `osm-btn-${trail.id}-${Date.now()}`;
 
-const popup = new mapboxgl.Popup({ offset: 12, closeButton: true })
-  .setLngLat(e.lngLat)
-  .setHTML(`
-    <div style="font-family: sans-serif; min-width: 200px;">
-      <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">⭐ ${trail.name}</div>
-      <div style="font-size: 12px; color: #555; line-height: 1.8;">
-        ${trail.distance ? `📏 ${trail.distance} km<br/>` : ""}
-        ${trail.ascent ? `⬆️ ${trail.ascent}m ascent<br/>` : ""}
-        ${trail.difficulty ? `💪 ${trail.difficulty.replace(/_/g, " ")}<br/>` : ""}
-        ${trail.description ? `📝 ${trail.description}<br/>` : ""}
-      </div>
-      <button class="osm-popup-btn" style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #3B82F6; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;">
-        View on OSM →
-      </button>
-    </div>
-  `)
-  .addTo(map.current!);
-
-popup.on("open", () => {
-  const container = popup.getElement();
-  const btn = container?.querySelector(".osm-popup-btn");
-  if (btn) {
-    btn.addEventListener("click", () => window.open(osmUrl, "_blank"));
-  }
-});
+        const popup = new mapboxgl.Popup({ offset: 12, closeButton: true })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family: sans-serif; min-width: 200px;">
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">⭐ ${trail.name}</div>
+              <div style="font-size: 12px; color: #555; line-height: 1.8;">
+                ${trail.distance ? `📏 ${trail.distance} km<br/>` : ""}
+                ${trail.ascent ? `⬆️ ${trail.ascent}m ascent<br/>` : ""}
+                ${trail.difficulty ? `💪 ${trail.difficulty.replace(/_/g, " ")}<br/>` : ""}
+                ${trail.description ? `📝 ${trail.description}<br/>` : ""}
+              </div>
+              <button id="${popupId}" style="display: inline-block; margin-top: 10px; padding: 6px 12px; background: #3B82F6; color: white; border-radius: 4px; border: none; font-size: 12px; font-weight: 600; cursor: pointer;">
+                View on OSM →
+              </button>
+            </div>
+          `)
+          .addTo(map.current!);
+        
+        setTimeout(() => {
+          const btn = document.getElementById(popupId);
+          if (btn) btn.onclick = () => window.open(trail.osm_url, "_blank");
+        }, 100);
       });
 
       map.current!.on("mouseenter", `suggested-hit-${trail.id}`, () => { map.current!.getCanvas().style.cursor = "pointer"; });
