@@ -137,12 +137,32 @@ export default function TrailMap() {
   useEffect(() => {
     const cached = localStorage.getItem("trail-activities");
     const cachedTime = localStorage.getItem("trail-activities-time");
-    const oneHour = 60 * 60 * 1000;
-    if (cached && cachedTime && Date.now() - parseInt(cachedTime) < oneHour) {
-      setActivities(JSON.parse(cached));
+    const oneDay = 24 * 60 * 60 * 1000;
+  
+    if (cached && cachedTime) {
+      const cachedActivities = JSON.parse(cached);
+      setActivities(cachedActivities);
       setLoading(false);
+  
+      if (Date.now() - parseInt(cachedTime) < oneDay) return;
+  
+      const lastActivity = cachedActivities[0];
+      const afterTimestamp = lastActivity
+        ? Math.floor(new Date(lastActivity.start_date).getTime() / 1000)
+        : 0;
+  
+      fetch(`/api/activities?after=${afterTimestamp}`)
+        .then((r) => r.json())
+        .then((newActivities) => {
+          if (!Array.isArray(newActivities) || newActivities.length === 0) return;
+          const merged = [...newActivities, ...cachedActivities];
+          setActivities(merged);
+          localStorage.setItem("trail-activities", JSON.stringify(merged));
+          localStorage.setItem("trail-activities-time", Date.now().toString());
+        });
       return;
     }
+  
     fetch("/api/activities")
       .then((r) => r.json())
       .then((data) => {
@@ -153,8 +173,8 @@ export default function TrailMap() {
       });
   }, []);
 
-  const fetchSuggestedTrails = useCallback(() => {
-  if (!map.current || !mapReady) {
+  const fetchSuggestedTrails = useCallback((force = false) => {
+    if (!map.current || !mapReady) {
     setTimeout(() => fetchSuggestedTrails(), 1000);
     return;
   }
@@ -164,6 +184,7 @@ export default function TrailMap() {
     alert("Please zoom in more to see suggested trails!");
     return;
   }
+
 
   const bounds = map.current.getBounds();
   if (!bounds) return;
@@ -175,6 +196,15 @@ export default function TrailMap() {
   const n = centerLat + maxDelta;
   const w = centerLng - maxDelta;
   const e = centerLng + maxDelta;
+
+  const cacheKey = `suggested-trails-${s.toFixed(2)}-${w.toFixed(2)}`;
+  const cachedTrails = localStorage.getItem(cacheKey);
+  const cachedTrailsTime = localStorage.getItem(`${cacheKey}-time`);
+  
+  if (!force && cachedTrails && cachedTrailsTime) {
+    setSuggestedTrails(JSON.parse(cachedTrails));
+    return;
+  }  
 
   // Query both named hiking relations AND named paths/tracks
   const query = `[out:json][timeout:60];(relation["route"="hiking"]["name"](${s},${w},${n},${e});way["highway"="path"]["name"](${s},${w},${n},${e});way["highway"="track"]["name"](${s},${w},${n},${e}););out body geom;`;  const encodedQuery = `data=${encodeURIComponent(query)}`;
@@ -269,6 +299,8 @@ if (el.type === "relation" && el.tags?.route === "hiking" && el.tags?.name) {
           .filter((t: SuggestedTrail | null): t is SuggestedTrail => t !== null && t.segments.length > 0);
 
         setSuggestedTrails(trails);
+        localStorage.setItem(cacheKey, JSON.stringify(trails));
+        localStorage.setItem(`${cacheKey}-time`, Date.now().toString());
         setLoadingSuggested(false);
       })
       .catch((err) => {
@@ -697,12 +729,34 @@ if (el.type === "relation" && el.tags?.route === "hiking" && el.tags?.name) {
       {sidebarOpen && (
         <div style={{ width: "280px", overflowY: "auto", padding: "1rem", background: "#1a1a1a", color: "white", flexShrink: 0 }}>
           <div style={{ display: "flex", gap: "8px", marginBottom: "1rem" }}>
-            <button
-              onClick={() => setActiveTab("my")}
-              style={{ flex: 1, padding: "8px", borderRadius: "8px", border: "none", background: activeTab === "my" ? "#2D6A4F" : "#2a2a2a", color: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600 }}
-            >
-              🥾 My Trails
-            </button>
+          <button
+  onClick={() => setActiveTab("my")}
+  style={{ flex: 1, padding: "8px", borderRadius: "8px", border: "none", background: activeTab === "my" ? "#2D6A4F" : "#2a2a2a", color: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600 }}
+>
+  🥾 My Trails
+</button>
+<button
+  onClick={() => {
+    localStorage.removeItem("trail-activities");
+    localStorage.removeItem("trail-activities-time");
+    setLoading(true);
+    fetch("/api/activities")
+      .then((r) => r.json())
+      .then((data) => {
+        setActivities(data);
+        setLoading(false);
+        localStorage.setItem("trail-activities", JSON.stringify(data));
+        localStorage.setItem("trail-activities-time", Date.now().toString());
+      });
+  }}
+  title="Sync new hikes from Strava"
+  style={{
+    padding: "8px 10px", borderRadius: "8px", border: "none",
+    background: "#2a2a2a", color: "white", cursor: "pointer", fontSize: "14px",
+  }}
+>
+  🔄
+</button>
             <button
               onClick={() => {
                 setActiveTab("suggested");
@@ -755,7 +809,7 @@ if (el.type === "relation" && el.tags?.route === "hiking" && el.tags?.name) {
           {activeTab === "suggested" && (
             <>
               <button
-                onClick={fetchSuggestedTrails}
+                onClick={() => fetchSuggestedTrails(true)}
                 disabled={loadingSuggested}
                 style={{
                   width: "100%", padding: "8px", borderRadius: "8px", border: "none",
